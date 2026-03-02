@@ -12,7 +12,7 @@ If you discover a security vulnerability in LICITRA-SENTRY, please report
 it responsibly:
 
 1. **Do NOT open a public GitHub issue.**
-2. Email: **narendra.nutalapati@outlook.com**
+2. Email: **narendrakumar.nutalapati@gmail.com**
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
