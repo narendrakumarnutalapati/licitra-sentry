@@ -1,0 +1,50 @@
+﻿[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "licitra-sentry"
+version = "0.1.0"
+description = "Zero-Trust Inter-Agent Communication Control Plane — identity attestation, content inspection, semantic contracts, authority enforcement, MMR-backed audit."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [
+    {name = "Narendra Kumar Nutalapati"}
+]
+keywords = [
+    "ai-safety",
+    "cryptography",
+    "agentic-ai",
+    "zero-trust",
+    "runtime-governance",
+    "chain-of-intent",
+    "owasp",
+    "licitra",
+    "audit-trail",
+    "content-inspection",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "cryptography>=42.0",
+    "pydantic>=2.6",
+    "requests>=2.31",
+    "fastapi>=0.109",
+    "uvicorn>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/narendrakumarnutalapati/licitra-sentry"
+Repository = "https://github.com/narendrakumarnutalapati/licitra-sentry"
+Issues = "https://github.com/narendrakumarnutalapati/licitra-sentry/issues"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

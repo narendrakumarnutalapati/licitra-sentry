@@ -1,0 +1,164 @@
+﻿# LICITRA-SENTRY Content Inspection Rules
+# Loaded at runtime by app/content_inspector.py
+# Each rule: {id, name, category, severity, pattern, action}
+# Actions: block | quarantine | flag
+# Severities: critical | high | medium | low
+#
+# Categories:
+#   relay_injection       - ASI01 Prompt Injection / Relay Injection
+#   pii_detection         - ASI06 Sensitive Data Exposure
+#   prompt_injection      - ASI01 Prompt Injection
+#   privilege_escalation  - ASI02 Excessive Agency
+#   system_prompt_leakage - ASI06 Sensitive Data Exposure
+
+rules:
+
+  # -- Relay Injection (5 rules) --
+
+  - id: RI-001
+    name: Ignore previous instructions
+    category: relay_injection
+    severity: critical
+    pattern: "(?i)ignore\\s+(all\\s+)?previous\\s+instructions"
+    action: block
+
+  - id: RI-002
+    name: Override system prompt
+    category: relay_injection
+    severity: critical
+    pattern: "(?i)override\\s+(the\\s+)?(system|original)\\s+(prompt|instructions)"
+    action: block
+
+  - id: RI-003
+    name: You are now a different agent
+    category: relay_injection
+    severity: high
+    pattern: "(?i)you\\s+are\\s+now\\s+(a|an|the)\\s+"
+    action: block
+
+  - id: RI-004
+    name: Disregard prior context
+    category: relay_injection
+    severity: critical
+    pattern: "(?i)disregard\\s+(all\\s+)?(prior|previous|above)\\s+(context|rules|instructions)"
+    action: block
+
+  - id: RI-005
+    name: New instructions follow
+    category: relay_injection
+    severity: high
+    pattern: "(?i)(new|updated|revised)\\s+instructions\\s*(follow|below|:|are)"
+    action: block
+
+  # -- PII Detection (5 rules) --
+
+  - id: PII-001
+    name: US Social Security Number
+    category: pii_detection
+    severity: critical
+    pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+    action: block
+
+  - id: PII-002
+    name: Email address
+    category: pii_detection
+    severity: medium
+    pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+    action: flag
+
+  - id: PII-003
+    name: Credit card number
+    category: pii_detection
+    severity: critical
+    pattern: "\\b(?:4\\d{3}|5[1-5]\\d{2}|3[47]\\d{2}|6(?:011|5\\d{2}))[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}\\b"
+    action: block
+
+  - id: PII-004
+    name: API key pattern
+    category: pii_detection
+    severity: high
+    pattern: "(?i)(api[_-]?key|apikey|secret[_-]?key|access[_-]?token)\\s*[:=]\\s*[\"']?[A-Za-z0-9_\\-]{20,}"
+    action: block
+
+  - id: PII-005
+    name: AWS access key
+    category: pii_detection
+    severity: critical
+    pattern: "\\bAKIA[0-9A-Z]{16}\\b"
+    action: block
+
+  # -- Prompt Injection (5 rules) --
+
+  - id: PI-001
+    name: System prompt extraction
+    category: prompt_injection
+    severity: critical
+    pattern: "(?i)(show|reveal|print|display|output|repeat)\\s+(me\\s+)?(your|the)\\s+(system|original|initial)\\s+(prompt|instructions|message)"
+    action: block
+
+  - id: PI-002
+    name: Role hijacking
+    category: prompt_injection
+    severity: high
+    pattern: "(?i)act\\s+as\\s+(if\\s+you\\s+are|a|an|the)\\s+"
+    action: block
+
+  - id: PI-003
+    name: Developer mode activation
+    category: prompt_injection
+    severity: critical
+    pattern: "(?i)(enter|enable|activate|switch\\s+to)\\s+(developer|debug|admin|god|sudo)\\s+(mode|access)"
+    action: block
+
+  - id: PI-004
+    name: Jailbreak attempt
+    category: prompt_injection
+    severity: critical
+    pattern: "(?i)(DAN|do\\s+anything\\s+now|jailbreak|bypass\\s+(safety|filter|restriction))"
+    action: block
+
+  - id: PI-005
+    name: Instruction boundary break
+    category: prompt_injection
+    severity: high
+    pattern: "(?i)(\\]\\]>|<\\/?system>|END\\s+OF\\s+SYSTEM|<\\|im_start\\|>)"
+    action: block
+
+  # -- Privilege Escalation (3 rules) --
+
+  - id: PE-001
+    name: Unauthorized tool invocation
+    category: privilege_escalation
+    severity: high
+    pattern: "(?i)(execute|run|invoke|call)\\s+(shell|bash|cmd|exec|eval|system)\\s*\\("
+    action: block
+
+  - id: PE-002
+    name: File system traversal
+    category: privilege_escalation
+    severity: high
+    pattern: "(?i)(\\.\\./|\\.\\\\|/etc/passwd|/etc/shadow|C:\\\\Windows)"
+    action: block
+
+  - id: PE-003
+    name: Permission escalation request
+    category: privilege_escalation
+    severity: high
+    pattern: "(?i)(grant|give|escalate|elevate)\\s+(me|yourself|this\\s+agent)\\s+(admin|root|sudo|superuser|elevated)\\s+(access|permission|privilege)"
+    action: block
+
+  # -- System Prompt Leakage (2 rules) --
+
+  - id: SPL-001
+    name: System prompt echo request
+    category: system_prompt_leakage
+    severity: critical
+    pattern: "(?i)what\\s+(is|are|was|were)\\s+(your|the)\\s+(system|initial|original|hidden)\\s+(prompt|instructions|directive|rules)"
+    action: block
+
+  - id: SPL-002
+    name: Configuration dump request
+    category: system_prompt_leakage
+    severity: high
+    pattern: "(?i)(dump|leak|expose|exfiltrate|extract)\\s+(your\\s+)?(config|configuration|settings|parameters|system\\s+prompt)"
+    action: block
