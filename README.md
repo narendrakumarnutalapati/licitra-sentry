@@ -1,209 +1,203 @@
-# LICITRA-SENTRY
+# LICITRA-SENTRY v0.2.0
 
-**Zero-Trust Inter-Agent Communication Control Plane**
+**Runtime Authorization, Tamper-Evident Audit, and Witnessed Transparency for Agentic AI Systems**
 
-Part of the [LICITRA Research Program](https://github.com/narendrakumarnutalapati/licitra-mmr-core) for cryptographic runtime governance of agentic AI systems.
+SENTRY is an open-source pre-execution authorization pipeline that cryptographically binds identity, content, semantic contracts, and authority enforcement before any agent action executes. Every decision — approved or rejected — is committed to an append-only hash-chained audit ledger and witnessed by an independent transparency log.
 
-## LICITRA Research Program
+## What's New in v0.2
+
+- **Execution Ticket System**: Ed25519-signed tickets cryptographically bind authorization decisions to exact request payloads
+- **Tool Proxy Gateway**: Mandatory mediation layer — no tool execution without a valid ticket
+- **Replay Protection**: SQLite-backed JTI tracking prevents ticket reuse
+- **Witnessed Transparency Layer**: CT-style Signed Inclusion Receipts from an independent witness — external auditors verify without trusting the operator
+- **Security Hardening**: Rate limiting, payload size limits, content inspection patterns
+
+## Architecture
+
 ```
-LICITRA (umbrella research program)
-├── LICITRA-MMR     → Integrity Layer
-│                     Merkle Mountain Range, epoch anchoring,
-│                     tamper-evident audit storage
-│                     Status: COMPLETE, production-grade, 11/11 tests
-│                     Paper: ACNS-ISC 2026 Submission 10
-│
-└── LICITRA-SENTRY  → Zero-Trust Control Plane (THIS REPO)
-                      Identity attestation, content inspection,
-                      semantic contracts, authority enforcement,
-                      orchestration guard, audit bridge to MMR
-                      Status: COMPLETE, 9/9 tests, 10/10 OWASP
+Agent Request
+     │
+┌────▼──────────────────────────────────────┐
+│  SENTRY Authorization Pipeline            │
+│                                           │
+│  Gate 1: Identity Verification            │
+│  Gate 2: Content Inspection               │
+│  Gate 3: Semantic Contract Validation     │
+│  Gate 4: Authority Enforcement            │
+│  Gate 5: Cryptographic Commit + Ticket    │
+└────┬──────────────────────────────────────┘
+     │
+     ▼ Execution Ticket (Ed25519 signed)
+     │
+┌────▼──────────────────────────────────────┐
+│  Tool Proxy Gateway                       │
+│                                           │
+│  1. Verify signature                      │
+│  2. Check expiration (60s max TTL)        │
+│  3. Match audience (tool_id)              │
+│  4. Match request hash (SHA-256)          │
+│  5. Reject replays (JTI check)            │
+└────┬──────────────────────────────────────┘
+     │
+     ▼ Tool Execution
+     │
+     ▼ Audit Event Committed
+     │
+     ▼ Epoch Witnessed (CT-style receipt)
 ```
 
-## Chain of Intent
+## Threat Model
 
-Every inter-agent communication passes through sequential cryptographic gates, each recorded in LICITRA-MMR:
-```
-┌──────────────────────────────────────────────────────────────┐
-│                      LICITRA-SENTRY                          │
-│  Identity   Content    Contract   Authority   Orchestration  │
-│  Notary     Inspector  Engine     Gate        Guard          │
-│     │          │          │          │            │           │
-│     ▼          ▼          ▼          ▼            ▼           │
-│  Ed25519    Regex      Pydantic   Token +     Delegation     │
-│  tokens     patterns   semantic   contract    policy +       │
-│  (ASI03)    (ASI01)    validation enforcement privilege      │
-│                        (ASI01,02) (ASI02)     check (ASI05)  │
-└──────────────────────────────┬───────────────────────────────┘
-                               │ POST /agent/propose
-                               │ POST /agent/commit/{staged_id}
-┌──────────────────────────────▼───────────────────────────────┐
-│                      LICITRA-MMR                             │
-│  Canonical JSON → SHA-256 → MMR → Epoch Chain                │
-│  Tamper-evident, cryptographically verifiable                │
-└──────────────────────────────────────────────────────────────┘
-```
+**Without witnesses:**
+- Detects DB tampering if keys intact and operator honest
+- Operator can rewrite history undetectably
 
-If any gate deviates, the audit trail in LICITRA-MMR exposes the mismatch. The chain is only as strong as its weakest link — and every link is cryptographically recorded.
+**With witnesses (CT-style receipts):**
+- Detects DB tampering even under operator compromise
+- Rewriting history requires ALL witnesses to collude
+- External auditors verify independently
 
-## OWASP Agentic Top 10 Coverage
+## Quick Start
 
-| OWASP ID | Category | LICITRA-SENTRY Gate | Status |
-|----------|----------|-------------------|--------|
-| ASI01 | Prompt Injection / Relay Injection | Content Inspector + Contract Engine | ✅ Covered |
-| ASI02 | Excessive Agency | Contract Engine + Authority Gate | ✅ Covered |
-| ASI03 | Agent Impersonation | Identity Notary (Ed25519) | ✅ Covered |
-| ASI04 | Insecure Output Handling | Audit Bridge → MMR | ✅ Covered |
-| ASI05 | Improper Multi-Agent Orchestration | Orchestration Guard (delegation policy + privilege non-escalation) | ✅ Covered |
-| ASI06 | Sensitive Data Exposure | Content Inspector + Contract Engine | ✅ Covered |
-| ASI07 | Inter-Agent Communication Integrity | Middleware Pipeline + MMR | ✅ Covered |
-| ASI08 | Audit and Logging Failures | Audit Bridge + LICITRA-MMR | ✅ Covered |
-| ASI09 | Insufficient Access Controls | Authority Gate (least-privilege per agent) | ✅ Covered |
-| ASI10 | Uncontrolled Agent Proliferation | Identity Registry | ✅ Covered |
-
-**Coverage: 10/10 categories explicitly addressed.**
-
-## Competitive Comparison vs Oktsec
-
-| Capability | Oktsec (Go, GPL-3.0) | LICITRA-SENTRY (Python, MIT) |
-|-----------|---------------------|---------------------------|
-| Identity layer | Ed25519 | Ed25519 |
-| Content inspection | YAML rule-based | YAML rule-based (22 rules) |
-| Hash logging | SHA-256 flat log | SHA-256 → MMR → Epoch chain |
-| Audit structure | Flat append log | Merkle Mountain Range |
-| Proof size | O(n) | O(log n) |
-| Pre-execution validation | No | Semantic contract engine |
-| Parameter shape validation | No | Pydantic-based |
-| Proof of authorization | No | Authority gate + MMR |
-| Delegation control | No | Orchestration guard |
-| Formal intent validation | No | Contract validator |
-| OWASP coverage | 7/10 | 10/10 |
-| License | GPL-3.0 | MIT |
-
-## Architectural Differentiation
-
-LICITRA-SENTRY implements everything Oktsec does and goes further. Where Oktsec provides proof of message (did this message pass through the filter?), LICITRA-SENTRY provides proof of authorization (was this agent allowed to perform this action, and was the decision cryptographically anchored?). The semantic contract engine validates intents before execution, not just content after arrival.
-
-The MMR-backed audit layer provides logarithmic proof size for any single event, meaning verification cost grows as O(log n) rather than O(n). Combined with epoch anchoring from LICITRA-MMR, any auditor can prove the complete state of the ledger at any point in time without replaying the entire history. The orchestration guard prevents privilege laundering across agent boundaries — an agent cannot delegate tasks it is not itself authorized to perform.
-
-## Components
-
-| Module | Purpose | OWASP |
-|--------|---------|-------|
-| `app/identity.py` | Ed25519 identity attestation, short-lived tokens | ASI03, ASI10 |
-| `app/content_inspector.py` | Regex-based content inspection (22 rules) | ASI01, ASI06, ASI07 |
-| `app/contract.py` | Pydantic semantic contract validation | ASI01, ASI02, ASI06 |
-| `app/authority.py` | Authority gate (token + contract enforcement) | ASI02, ASI09 |
-| `app/orchestration.py` | Delegation policy + privilege non-escalation | ASI05 |
-| `app/middleware.py` | Chain of Intent pipeline | ASI07 |
-| `app/audit_bridge.py` | 2-phase commit bridge to LICITRA-MMR | ASI04, ASI08 |
-
-## Reproducible Experiments
-
-Individual experiment scripts are in the `experiments/` folder. Each is standalone and self-contained.
-
-| Script | Experiment | OWASP |
-|--------|-----------|-------|
-| `experiments/run_exp01_happy_path.py` | EXP-01: Happy Path — Approved | ASI07 |
-| `experiments/run_exp02_contract_rejection.py` | EXP-02: Contract Rejection | ASI02 |
-| `experiments/run_exp03_identity_expiry.py` | EXP-03: Identity Expiry Rejection | ASI03 |
-| `experiments/run_exp04_relay_injection.py` | EXP-04: Relay Injection Blocked | ASI01 |
-| `experiments/run_exp05_pii_exfiltration.py` | EXP-05: PII Exfiltration Blocked | ASI06 |
-| `experiments/run_exp06_unauthorized_delegation.py` | EXP-06: Unauthorized Delegation Blocked | ASI05 |
-
-Run a single experiment:
 ```bash
-python experiments/run_exp01_happy_path.py
-```
-
-Run all 6 experiments:
-```bash
-python experiments/run_all_experiments.py
-```
-
-Each experiment prints its decision, gate fired, MMR leaf_hash, and verdict (CONFIRMED/FAILED).
-
-## Quickstart
-
-### Prerequisites
-
-- Python 3.12+
-- LICITRA-MMR running at `http://localhost:8000`
-
-### Install
-```bash
-cd licitra-sentry
 pip install -r requirements.txt
+
+# Run all tests (13/13)
+python tests/test_sentry_v02.py
+python tests/test_witness.py
+
+# Run demos
+python demo_ticket_execution.py
+python demo_witness.py
 ```
 
-### Start LICITRA-MMR (separate terminal)
-```bash
-cd licitra-mmr-core
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+## Test Suite (13 experiments)
+
+| ID | Scenario | Tests |
+|----|----------|-------|
+| E01 | Authorized ticket flow | Full pipeline → ticket → proxy → execute |
+| E02 | Proxy bypass attempt | Fake ticket rejected (signature invalid) |
+| E03 | Replay attack | Reused ticket rejected (JTI already seen) |
+| E04 | Payload modification | Modified request rejected (hash mismatch) |
+| E05 | Expired ticket | TTL exceeded → rejected |
+| E06 | Delegation escalation | Delegated agent blocked from unauthorized tool |
+| E07 | PII exfiltration | SSN/CC patterns blocked by content inspection |
+| E08 | Audit chain integrity | Hash chain verified across all events |
+| E09 | Epoch witnessed | CT-style receipt issued, signature valid |
+| E10 | Operator rewrite detected | Tampered root mismatches witness receipt |
+| E11 | Auditor verification | Evidence bundle verified independently |
+| E12 | Tampered receipt rejected | Forged witness signature detected |
+| E13 | Chain break detected | Modified epoch chain flagged by verifier |
+
+## Witnessed Transparency Layer
+
+Every N audit events, an epoch finalizes and is submitted to an independent transparency log:
+
+**What gets witnessed:**
+- `epoch_root` — MMR root hash (audit state)
+- `prev_epoch_root` — chain link to previous epoch
+- `policy_hash` — SHA-256 of policy bundle (what rules were active)
+- `sentry_build_hash` — git commit (what code was running)
+- `event_count`, `timestamp`, `operator_id`
+
+**What comes back:**
+- Signed Inclusion Receipt (Ed25519, separate key from SENTRY)
+- Log sequence number (monotonic)
+- Log timestamp
+
+**Auditor workflow:**
+1. Receive evidence bundle (epoch records + receipts)
+2. Receive transparency log's public key
+3. Run `WitnessVerifier` — checks signatures, digests, chain continuity, monotonic ordering
+4. No trust in operator required
+
+## Execution Ticket Protocol
+
+Each ticket contains:
+
+| Field | Purpose |
+|-------|---------|
+| `sub` | Agent identity |
+| `aud` | Target tool |
+| `jti` | Unique ticket ID (replay protection) |
+| `exp` | Expiration (max 60s TTL) |
+| `request_hash` | SHA-256 of canonicalized request payload |
+| `contract_id` | Semantic contract evaluated |
+| `policy_version` | Policy version at authorization time |
+| `mmr_commit_id` | Audit ledger commit for this authorization |
+
+Modifying any byte of the request after authorization invalidates the hash. The proxy rejects it.
+
+## Attacks Prevented
+
+1. **Unauthorized tool invocation** — no valid ticket, no execution (E02)
+2. **Payload modification** — hash mismatch detected (E04)
+3. **Ticket replay** — JTI already used (E03)
+4. **Privilege escalation via delegation** — contract + authority bounds (E06)
+5. **PII/credential exfiltration** — content inspection blocks patterns (E07)
+6. **Audit tampering** — hash chain detects modification (E08)
+7. **Expired authorization** — 60s TTL enforced (E05)
+8. **Operator history rewrite** — witness receipt contradicts (E10)
+
+## Attacks NOT Prevented
+
+1. **Full witness collusion** — if ALL witnesses collude with operator, history can be rewritten
+2. **Semantic bypass** — content inspection is pattern-based, not semantic
+3. **Key compromise** — forged tickets possible (but NOT forged witness receipts — separate key)
+4. **Compromised tool** — proxy can't detect malicious behavior inside the tool
+5. **Ticket revocation** — no revocation mechanism; 60s TTL bounds the risk
+6. **Adversarial load** — not benchmarked under sustained attack
+
+## Project Structure
+
+```
+app/
+  key_manager.py        # Ed25519 key lifecycle (abstract KeyProvider interface)
+  ticket.py             # Execution ticket issuance and verification
+  tool_proxy.py         # Mandatory mediation gateway with replay protection
+  witness.py            # CT-style transparency log + receipts + auditor verifier
+  identity.py           # Gate 1: Identity verification
+  content_inspector.py  # Gate 2: Content inspection
+  contract.py           # Gate 3: Semantic contract validation
+  authority.py          # Gate 4: Authority enforcement
+  audit_bridge.py       # Gate 5: Cryptographic commit + epoch witnessing
+  anchor.py             # External anchor module (pluggable)
+  orchestrator.py       # Five-gate pipeline orchestrator
+
+tests/
+  test_sentry_v02.py    # 8 experiments (E01-E08)
+  test_witness.py       # 5 experiments (E09-E13)
+
+demo_ticket_execution.py  # Authorized send, PII blocked, delegation blocked
+demo_witness.py           # Witnessed epochs, attack detection, auditor verification
 ```
 
-### Run Demo
-```bash
-python demo_swarm.py
-```
+## OWASP Agentic Top 10 Mapping
 
-### Run Tests
-```powershell
-powershell -ExecutionPolicy Bypass -File tests\run_all_tests.ps1
-```
+| ASI Category | SENTRY Control |
+|-------------|----------------|
+| ASI01: Agent Goal Hijack | Semantic contract limits scope |
+| ASI02: Tool Misuse | Ticket request hash + content inspection |
+| ASI03: Identity & Privilege Abuse | Identity + authority with delegation bounds |
+| ASI04: Supply Chain | Identity rejects unregistered components |
+| ASI05: Unexpected Code Execution | Content inspection + contract |
+| ASI06: Memory & Context Poisoning | Hash-chained audit + witness receipts |
+| ASI07: Insecure Inter-Agent Comm. | Identity at every boundary + audit |
+| ASI08: Cascading Failures | Per-gate audit for failure tracing |
+| ASI09: Human-Agent Trust | Authorization committed as verifiable artifacts |
+| ASI10: Rogue Agents | Contract + authority + audit trail |
 
-## Demo Scenarios
+## References
 
-| Scenario | Agent | Intent | Expected | OWASP |
-|----------|-------|--------|----------|-------|
-| S1 | Researcher | READ | APPROVED | ASI07 |
-| S2 | Researcher | FILE_WRITE | REJECTED (contract) | ASI02 |
-| S3 | Researcher | READ (expired token) | REJECTED (identity) | ASI03 |
-| S4 | Researcher | READ (relay injection) | REJECTED (inspector) | ASI01 |
-| S5 | Researcher | SUMMARIZE (SSN in msg) | REJECTED (inspector) | ASI06 |
-| S6 | Coder | FILE_WRITE (delegate to researcher) | REJECTED (orchestration) | ASI05 |
-
-## Test Results
-
-| Test | Description | Status |
-|------|------------|--------|
-| t01_identity | Token issuance, verification, expiry, unknown agent | ✅ PASS |
-| t02_contract | Allowed/unknown intent, tool, parameter shape | ✅ PASS |
-| t03_authority | Approved path, expired token, disallowed intent/tool | ✅ PASS |
-| t04_content_inspector | Clean msg, relay injection, PII, prompt injection, privilege escalation | ✅ PASS |
-| t05_middleware | Approved path, rejected path, inspection blocked, all to MMR | ✅ PASS |
-| t06_audit_bridge | Emit produces staged_id + event_id, leaf_hash 64 hex | ✅ PASS |
-| t07_swarm_scenarios | All 6 scenarios, MMR leaf_hash confirmed | ✅ PASS |
-| t08_determinism | Same inputs → same outputs always | ✅ PASS |
-| t09_owasp_coverage | ASI01-ASI10 all gates confirmed, MMR leaf_hash per block | ✅ PASS |
-
-**9/9 tests passing.**
-
-
-## MMR Paper Future Scope Fulfillment
-
-The LICITRA-MMR paper (ACNS-ISC 2026, Submission 10) identified four limitations in Section 10. LICITRA-SENTRY directly addresses two of them:
-
-| MMR Paper Section | Limitation | Addressed By | Status |
-|------------------|-----------|-------------|--------|
-| 10.1 | Float Normalization Gap (RFC 8785 S3.2.2) | LICITRA-MMR v1.1 (planned) | Future |
-| 10.2 | Unsigned Epoch Roots (Ed25519 signing) | SENTRY `app/identity.py` - Ed25519 CovenantNotary | Implemented |
-| 10.3 | Single-Operator Trust (multi-party witnessing) | Multi-party witnessing protocol (planned) | Future |
-| 10.4 | Pre-Execution Integrity (semantic contracts) | SENTRY Chain of Intent - full pipeline | Implemented |
-
-**Section 10.2 - Ed25519 Identity:** The MMR paper noted epoch hashes were not signed. SENTRY introduces Ed25519 cryptographic signing at the agent session level via the CovenantNotary.
-
-**Section 10.4 - Chain of Intent:** The MMR paper explicitly identified SENTRY as the solution: LICITRA-SENTRY intercepts agent actions before they reach the commit pipeline, evaluates them against declarative per-agent semantic contracts, and binds the authorization decision to the MMR record in the same transaction. This is exactly what the Chain of Intent pipeline implements with commitment-before-execution and cryptographic evidence of policy evaluation.
+- LICITRA-SENTRY v0.1 TR: [doi.org/10.5281/zenodo.18843784](https://doi.org/10.5281/zenodo.18843784)
+- LICITRA-MMR TR: [doi.org/10.5281/zenodo.18843032](https://doi.org/10.5281/zenodo.18843032)
+- OWASP Top 10 for Agentic Applications (2026): [genai.owasp.org](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT License. See [LICENSE](LICENSE).
 
 ## Author
 
 Narendra Kumar Nutalapati
-
-## Related
-
-- [LICITRA-MMR](https://github.com/narendrakumarnutalapati/licitra-mmr-core) — Cryptographic integrity layer
-- [LICITRA-SENTRY Evidence](https://github.com/narendrakumarnutalapati/licitra-sentry-evidence) — Reproducible experiments and evidence bundles
+- GitHub: [github.com/narendrakumarnutalapati](https://github.com/narendrakumarnutalapati)
