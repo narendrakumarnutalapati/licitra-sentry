@@ -21,6 +21,13 @@ from pathlib import Path
 
 from app.anchor import AnchorManager, AnchorRecord
 
+# Optional witness import — gracefully degrade if not configured
+try:
+    from app.witness import WitnessClient, SignedInclusionReceipt
+except ImportError:
+    WitnessClient = None
+    SignedInclusionReceipt = None
+
 
 @dataclass
 class AuditEvent:
@@ -54,13 +61,21 @@ class AuditBridge:
         self,
         log_path: str = "data/audit_log.jsonl",
         anchor_manager: Optional[AnchorManager] = None,
+        witness_client: Optional["WitnessClient"] = None,
+        epoch_size: int = 10,
     ):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.anchor_manager = anchor_manager
+        self.witness_client = witness_client
+        self.epoch_size = epoch_size
         self._previous_hash = "0" * 64  # genesis hash
         self._event_count = 0
+        self._epoch_event_count = 0
+        self._current_epoch = 0
+        self._prev_epoch_root = "0" * 64
         self._events: list[AuditEvent] = []
+        self._receipts: list = []
 
     def commit(self, event: AuditEvent) -> str:
         """
@@ -106,6 +121,7 @@ class AuditBridge:
 
         self._previous_hash = event.event_hash
         self._event_count += 1
+        self._epoch_event_count += 1
         self._events.append(event)
 
         # Check if anchoring should trigger
@@ -113,6 +129,10 @@ class AuditBridge:
             anchor = self.anchor_manager.on_commit(event.event_hash)
             if anchor:
                 self._commit_anchor_event(anchor)
+
+        # Check if epoch should finalize and be witnessed
+        if self.witness_client and self._epoch_event_count >= self.epoch_size:
+            self._finalize_and_witness_epoch()
 
         return event.event_hash
 
@@ -133,6 +153,42 @@ class AuditBridge:
         )
         # Recursive commit (anchor event is also logged)
         self.commit(anchor_event)
+
+    def _finalize_and_witness_epoch(self):
+        """Finalize the current epoch and submit to transparency log."""
+        self._current_epoch += 1
+        epoch_root = self._previous_hash  # current chain head
+
+        receipt = self.witness_client.witness_epoch(
+            epoch_id=self._current_epoch,
+            epoch_root=epoch_root,
+            prev_epoch_root=self._prev_epoch_root,
+            event_count=self._epoch_event_count,
+        )
+
+        self._receipts.append(receipt)
+        self._prev_epoch_root = epoch_root
+        self._epoch_event_count = 0
+
+        # Log the witness event itself
+        witness_event = AuditEvent(
+            event_id=f"witness-epoch-{self._current_epoch}",
+            event_type="epoch_witnessed",
+            timestamp=time.time(),
+            agent_id="system",
+            details={
+                "epoch_id": self._current_epoch,
+                "epoch_root": epoch_root,
+                "receipt_id": receipt.receipt_id,
+                "log_id": receipt.log_id,
+                "log_sequence": receipt.log_sequence,
+            },
+        )
+        self.commit(witness_event)
+
+    def get_receipts(self) -> list:
+        """Return all witness receipts collected so far."""
+        return list(self._receipts)
 
     def verify_chain(self) -> tuple[bool, Optional[str]]:
         """
