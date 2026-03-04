@@ -1,174 +1,169 @@
-﻿"""
-LICITRA-SENTRY Audit Bridge - LICITRA-MMR Integration.
-
-Bridges every SENTRY decision (approved AND rejected) into LICITRA-MMR
-via its 2-phase commit API. LICITRA-SENTRY never stores its own ledger;
-all integrity flows through LICITRA-MMR.
-
-API contract:
-    POST /agent/propose         -> {staged_id, status, ...}
-    POST /agent/commit/{id}     -> {event_id, leaf_hash, ...}
-
-OWASP Agentic Coverage:
-    ASI04 - Insecure Output Handling: All outputs committed to MMR
-            for tamper-evident record of every decision.
-    ASI08 - Audit and Logging Failures: MMR-backed tamper-evident
-            audit with epoch anchoring proves ledger state at any
-            point in time.
 """
+LICITRA-SENTRY v0.2 — Audit Bridge
 
-from __future__ import annotations
+Bridges SENTRY authorization/execution events to the MMR audit ledger.
+Every gate decision, ticket issuance, and tool execution is committed.
+
+In production, this would connect to a running LICITRA-MMR instance.
+This reference implementation uses a local append-only log with
+hash chaining for demonstration.
+
+Author: Narendra Kumar Nutalapati
+License: MIT
+"""
 
 import json
 import time
-from dataclasses import dataclass
-from typing import Any, Optional
+import hashlib
+from dataclasses import dataclass, field
+from typing import Optional, Callable
+from pathlib import Path
 
-import requests
-
-
-# ---------------------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class AuditResult:
-    """Outcome of emitting an audit event to LICITRA-MMR."""
-    success: bool
-    staged_id: Optional[int]
-    event_id: Optional[str]
-    leaf_hash: Optional[str]
-    error: Optional[str]
+from app.anchor import AnchorManager, AnchorRecord
 
 
-# ---------------------------------------------------------------------------
-# AuditBridge
-# ---------------------------------------------------------------------------
+@dataclass
+class AuditEvent:
+    event_id: str
+    event_type: str
+    timestamp: float
+    agent_id: str
+    tool_id: str = ""
+    gate: str = ""
+    decision: str = ""     # "approved", "rejected"
+    details: dict = field(default_factory=dict)
+    event_hash: str = ""
+    previous_hash: str = ""
+
 
 class AuditBridge:
     """
-    2-phase commit bridge to LICITRA-MMR.
+    Commits authorization and execution events to an append-only ledger.
 
-    propose() -> POST /agent/propose
-    commit()  -> POST /agent/commit/{staged_id}
-    emit()    -> propose + commit in sequence
+    Each event is:
+      1. Serialized to canonical JSON
+      2. Hashed with SHA-256
+      3. Chained to the previous event hash
+      4. Appended to the log
 
-    OWASP: ASI04 (Insecure Output Handling), ASI08 (Audit/Logging Failures)
+    This provides hash-chain integrity: modifying any event
+    invalidates all subsequent hashes.
     """
 
     def __init__(
         self,
-        mmr_base_url: str = "http://localhost:8000",
-        org_id: str = "sentry-org",
-    ) -> None:
-        self._base_url = mmr_base_url.rstrip("/")
-        self._org_id = org_id
+        log_path: str = "data/audit_log.jsonl",
+        anchor_manager: Optional[AnchorManager] = None,
+    ):
+        self.log_path = Path(log_path)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.anchor_manager = anchor_manager
+        self._previous_hash = "0" * 64  # genesis hash
+        self._event_count = 0
+        self._events: list[AuditEvent] = []
 
-    def _build_proposed_json(self, event: dict[str, Any]) -> str:
+    def commit(self, event: AuditEvent) -> str:
         """
-        Build a valid proposed_json string for LICITRA-MMR.
+        Commit an audit event to the ledger.
 
-        MMR requires: action_type, agent_id, timestamp.
-        We inject these if not already present, then serialize to
-        canonical JSON string.
+        Returns:
+            The event hash (which becomes the chain link for the next event).
         """
-        enriched = dict(event)
-        if "action_type" not in enriched:
-            enriched["action_type"] = "AUDIT"
-        if "agent_id" not in enriched:
-            enriched["agent_id"] = "sentry"
-        if "timestamp" not in enriched:
-            enriched["timestamp"] = time.time()
-        return json.dumps(enriched, sort_keys=True, separators=(",", ":"))
+        event.previous_hash = self._previous_hash
 
-    def propose(self, event: dict[str, Any]) -> dict[str, Any]:
-        """
-        Phase 1: Propose an audit event to LICITRA-MMR.
-
-        POST /agent/propose
-        Body: {org_id, agent_id, proposed_json (string)}
-
-        Returns the raw JSON response from MMR.
-        Raises RuntimeError on HTTP failure.
-        """
-        proposed_json_str = self._build_proposed_json(event)
+        # Canonical serialization for hashing
         payload = {
-            "org_id": self._org_id,
-            "agent_id": event.get("agent_id", "sentry"),
-            "proposed_json": proposed_json_str,
+            "event_id": event.event_id,
+            "event_type": event.event_type,
+            "timestamp": event.timestamp,
+            "agent_id": event.agent_id,
+            "tool_id": event.tool_id,
+            "gate": event.gate,
+            "decision": event.decision,
+            "details": event.details,
+            "previous_hash": event.previous_hash,
         }
-        resp = requests.post(
-            f"{self._base_url}/agent/propose",
-            json=payload,
-            timeout=10,
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        event.event_hash = hashlib.sha256(canonical.encode()).hexdigest()
+
+        # Append to log
+        with open(self.log_path, "a") as f:
+            record = {
+                "event_id": event.event_id,
+                "event_type": event.event_type,
+                "timestamp": event.timestamp,
+                "agent_id": event.agent_id,
+                "tool_id": event.tool_id,
+                "gate": event.gate,
+                "decision": event.decision,
+                "details_hash": hashlib.sha256(
+                    json.dumps(event.details, sort_keys=True).encode()
+                ).hexdigest(),
+                "event_hash": event.event_hash,
+                "previous_hash": event.previous_hash,
+            }
+            f.write(json.dumps(record) + "\n")
+
+        self._previous_hash = event.event_hash
+        self._event_count += 1
+        self._events.append(event)
+
+        # Check if anchoring should trigger
+        if self.anchor_manager:
+            anchor = self.anchor_manager.on_commit(event.event_hash)
+            if anchor:
+                self._commit_anchor_event(anchor)
+
+        return event.event_hash
+
+    def _commit_anchor_event(self, anchor: AnchorRecord):
+        """Record the anchoring event itself in the audit log."""
+        anchor_event = AuditEvent(
+            event_id=f"anchor-{anchor.anchor_id}",
+            event_type="external_anchor",
+            timestamp=time.time(),
+            agent_id="system",
+            details={
+                "anchor_id": anchor.anchor_id,
+                "epoch": anchor.epoch,
+                "mmr_root_hash": anchor.mmr_root_hash,
+                "provider": anchor.provider,
+                "external_ref": anchor.external_ref,
+            },
         )
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"MMR propose failed (HTTP {resp.status_code}): {resp.text}"
-            )
-        return resp.json()
+        # Recursive commit (anchor event is also logged)
+        self.commit(anchor_event)
 
-    def commit(self, staged_id: int) -> dict[str, Any]:
+    def verify_chain(self) -> tuple[bool, Optional[str]]:
         """
-        Phase 2: Commit a staged event in LICITRA-MMR.
+        Verify the integrity of the entire audit chain.
 
-        POST /agent/commit/{staged_id}
-
-        Returns the raw JSON response from MMR.
-        Raises RuntimeError on HTTP failure.
+        Returns:
+            (valid, error_message)
         """
-        resp = requests.post(
-            f"{self._base_url}/agent/commit/{staged_id}",
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"MMR commit failed (HTTP {resp.status_code}): {resp.text}"
-            )
-        return resp.json()
+        if not self.log_path.exists():
+            return True, None
 
-    def emit(self, event: dict[str, Any]) -> AuditResult:
-        """
-        Full 2-phase commit: propose then commit.
+        previous_hash = "0" * 64
 
-        Returns AuditResult with staged_id, event_id, and leaf_hash
-        on success, or error details on failure.
-        """
-        try:
-            propose_resp = self.propose(event)
-            staged_id = propose_resp.get("staged_id")
-            if staged_id is None:
-                return AuditResult(
-                    success=False,
-                    staged_id=None,
-                    event_id=None,
-                    leaf_hash=None,
-                    error="MMR propose response missing staged_id",
-                )
+        with open(self.log_path, "r") as f:
+            for line_num, line in enumerate(f, 1):
+                record = json.loads(line.strip())
 
-            # MMR may reject at propose stage
-            if propose_resp.get("status") != "APPROVED":
-                return AuditResult(
-                    success=False,
-                    staged_id=staged_id,
-                    event_id=None,
-                    leaf_hash=None,
-                    error=f"MMR rejected proposal: {propose_resp.get('decision_reason')}",
-                )
+                if record["previous_hash"] != previous_hash:
+                    return False, (
+                        f"Chain break at line {line_num}: "
+                        f"expected previous_hash={previous_hash}, "
+                        f"got {record['previous_hash']}"
+                    )
 
-            commit_resp = self.commit(staged_id)
-            return AuditResult(
-                success=True,
-                staged_id=staged_id,
-                event_id=commit_resp.get("event_id"),
-                leaf_hash=commit_resp.get("leaf_hash"),
-                error=None,
-            )
-        except Exception as exc:
-            return AuditResult(
-                success=False,
-                staged_id=None,
-                event_id=None,
-                leaf_hash=None,
-                error=str(exc),
-            )
+                previous_hash = record["event_hash"]
+
+        return True, None
+
+    def get_current_root(self) -> str:
+        """Return the current chain head hash (latest event hash)."""
+        return self._previous_hash
+
+    def get_event_count(self) -> int:
+        return self._event_count

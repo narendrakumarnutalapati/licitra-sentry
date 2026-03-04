@@ -1,154 +1,120 @@
-﻿"""
-LICITRA-SENTRY Content Inspector.
+"""
+LICITRA-SENTRY v0.2 — Gate 2: Content Inspection
 
-Regex-based content inspection layer that runs after identity check
-and before contract validation. Inspects message content for relay
-injection, PII patterns, prompt injection signatures, privilege
-escalation requests, and system prompt leakage attempts.
+Scans tool request payloads for dangerous patterns before authorization.
+Operates on the raw request content, not on model outputs.
 
-Deterministic - no LLM calls, no external network calls.
-Rules loaded from content_rules.yaml at runtime.
-
-OWASP Agentic Coverage:
-    ASI01 - Prompt Injection / Relay Injection: Detects and blocks
-            injected instructions and relay attack patterns.
-    ASI06 - Sensitive Data Exposure: Detects PII patterns (SSN,
-            credit card, API keys) before they leave the system.
-    ASI07 - Inter-Agent Communication Integrity: All findings are
-            emitted to LICITRA-MMR for tamper-evident audit.
+Author: Narendra Kumar Nutalapati
+License: MIT
 """
 
-from __future__ import annotations
-
 import re
+import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
-import yaml
 
-
-# ---------------------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class Finding:
-    """A single content inspection finding."""
-    rule_id: str
-    rule_name: str
-    category: str
-    severity: str
-    matched_pattern: str
-    action: str            # "block" | "quarantine" | "flag"
-
-
-@dataclass(frozen=True)
+@dataclass
 class InspectionResult:
-    """Outcome of content inspection."""
-    clean: bool
-    findings: list[Finding]
-    severity: str          # highest severity among findings, or "none"
+    passed: bool
+    findings: list[str] = field(default_factory=list)
+    risk_level: str = "none"  # none, low, medium, high, critical
+    error: Optional[str] = None
 
 
-@dataclass(frozen=True)
-class ContentRule:
-    """A single rule loaded from content_rules.yaml."""
-    id: str
-    name: str
-    category: str
-    severity: str
-    pattern: str
-    action: str
-    compiled: re.Pattern
-
-
-# ---------------------------------------------------------------------------
-# Severity ordering
-# ---------------------------------------------------------------------------
-
-_SEVERITY_RANK: dict[str, int] = {
-    "critical": 4,
-    "high": 3,
-    "medium": 2,
-    "low": 1,
-    "none": 0,
+# Default patterns for content inspection
+DEFAULT_PATTERNS = {
+    "pii_email": {
+        "pattern": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+        "risk": "medium",
+        "description": "Email address detected in payload",
+    },
+    "pii_ssn": {
+        "pattern": r"\b\d{3}-\d{2}-\d{4}\b",
+        "risk": "critical",
+        "description": "SSN pattern detected in payload",
+    },
+    "pii_credit_card": {
+        "pattern": r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",
+        "risk": "critical",
+        "description": "Credit card number pattern detected",
+    },
+    "shell_injection": {
+        "pattern": r"[;&|`$]|\brm\s+-rf\b|\bsudo\b|\bchmod\b|\bchown\b",
+        "risk": "critical",
+        "description": "Shell injection pattern detected",
+    },
+    "sql_injection": {
+        "pattern": r"\b(UNION\s+SELECT|DROP\s+TABLE|DELETE\s+FROM|INSERT\s+INTO)\b",
+        "risk": "critical",
+        "description": "SQL injection pattern detected",
+    },
+    "path_traversal": {
+        "pattern": r"\.\./|\.\.\\",
+        "risk": "high",
+        "description": "Path traversal pattern detected",
+    },
+    "exfiltration_url": {
+        "pattern": r"https?://(?!internal\.)[^\s]+",
+        "risk": "low",
+        "description": "External URL detected in payload",
+    },
 }
 
+RISK_LEVELS = ["none", "low", "medium", "high", "critical"]
 
-def _highest_severity(findings: list[Finding]) -> str:
-    """Return the highest severity among findings, or 'none'."""
-    if not findings:
-        return "none"
-    return max(findings, key=lambda f: _SEVERITY_RANK.get(f.severity, 0)).severity
-
-
-# ---------------------------------------------------------------------------
-# ContentInspector
-# ---------------------------------------------------------------------------
 
 class ContentInspector:
     """
-    Inspects message content against rules loaded from content_rules.yaml.
+    Gate 2: Inspect request payloads for dangerous patterns.
 
-    OWASP: ASI01 (Prompt/Relay Injection), ASI06 (Sensitive Data Exposure),
-           ASI07 (Inter-Agent Communication Integrity)
+    Scans all string values in the request recursively.
+    Returns findings with risk levels.
     """
 
-    def __init__(self, rules_path: Optional[str] = None) -> None:
-        if rules_path is None:
-            rules_path = str(Path(__file__).resolve().parent.parent / "content_rules.yaml")
-        self._rules: list[ContentRule] = self._load_rules(rules_path)
+    def __init__(self, patterns: Optional[dict] = None, block_threshold: str = "high"):
+        self.patterns = patterns or DEFAULT_PATTERNS
+        self.block_threshold = block_threshold
+        self._compiled = {
+            name: re.compile(cfg["pattern"], re.IGNORECASE)
+            for name, cfg in self.patterns.items()
+        }
 
-    @staticmethod
-    def _load_rules(path: str) -> list[ContentRule]:
-        """Load and compile rules from YAML file."""
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh)
+    def inspect(self, request: dict) -> InspectionResult:
+        """Inspect a tool request payload."""
+        findings = []
+        max_risk = "none"
 
-        rules: list[ContentRule] = []
-        for entry in data.get("rules", []):
-            compiled = re.compile(entry["pattern"])
-            rules.append(ContentRule(
-                id=entry["id"],
-                name=entry["name"],
-                category=entry["category"],
-                severity=entry["severity"],
-                pattern=entry["pattern"],
-                action=entry["action"],
-                compiled=compiled,
-            ))
-        return rules
+        # Extract all string values recursively
+        strings = self._extract_strings(request)
 
-    @property
-    def rule_count(self) -> int:
-        """Number of loaded rules."""
-        return len(self._rules)
+        for text in strings:
+            for name, compiled in self._compiled.items():
+                if compiled.search(text):
+                    cfg = self.patterns[name]
+                    findings.append(f"[{cfg['risk'].upper()}] {cfg['description']}: pattern={name}")
+                    if RISK_LEVELS.index(cfg["risk"]) > RISK_LEVELS.index(max_risk):
+                        max_risk = cfg["risk"]
 
-    def inspect(self, message: str) -> InspectionResult:
-        """
-        Scan a message against all loaded rules.
-
-        Returns InspectionResult with clean=True if no blocking findings,
-        or clean=False with the list of findings.
-        """
-        findings: list[Finding] = []
-
-        for rule in self._rules:
-            if rule.compiled.search(message):
-                findings.append(Finding(
-                    rule_id=rule.id,
-                    rule_name=rule.name,
-                    category=rule.category,
-                    severity=rule.severity,
-                    matched_pattern=rule.pattern,
-                    action=rule.action,
-                ))
-
-        has_block = any(f.action == "block" for f in findings)
+        blocked = RISK_LEVELS.index(max_risk) >= RISK_LEVELS.index(self.block_threshold)
 
         return InspectionResult(
-            clean=len(findings) == 0 or not has_block,
+            passed=not blocked,
             findings=findings,
-            severity=_highest_severity(findings),
+            risk_level=max_risk,
         )
+
+    def _extract_strings(self, obj, depth: int = 0) -> list[str]:
+        """Recursively extract all string values from a nested structure."""
+        if depth > 20:
+            return []
+        strings = []
+        if isinstance(obj, str):
+            strings.append(obj)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                strings.extend(self._extract_strings(v, depth + 1))
+        elif isinstance(obj, (list, tuple)):
+            for item in obj:
+                strings.extend(self._extract_strings(item, depth + 1))
+        return strings

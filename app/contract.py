@@ -1,253 +1,144 @@
-﻿"""
-LICITRA-SENTRY Semantic Contract Engine.
+"""
+LICITRA-SENTRY v0.2 — Gate 3: Semantic Contract Validation
 
-Defines AgenticSafetyContract and ContractValidator. Every agent is
-bound to a contract that specifies exactly which intents, tools, and
-parameter shapes it may use. Validation is pure and deterministic -
-no LLM calls, no network calls.
+Evaluates whether an agent's requested action falls within its
+defined semantic contract — a machine-evaluable specification of
+what the agent is permitted to do.
 
-OWASP Agentic Coverage:
-    ASI01 - Prompt Injection / Relay Injection: Contract engine rejects
-            intents not in the agent's allowed list; an injected
-            instruction cannot forge a valid contract entry.
-    ASI02 - Excessive Agency: Allowed tools and parameter shapes enforce
-            least-privilege at the semantic level.
-    ASI06 - Sensitive Data Exposure: Parameter shape validation blocks
-            unauthorized data access patterns at the intent level.
+Author: Narendra Kumar Nutalapati
+License: MIT
 """
 
-from __future__ import annotations
-
-import re
-from dataclasses import dataclass
-from typing import Any, Optional
-
-from pydantic import BaseModel, Field
+import time
+from dataclasses import dataclass, field
+from typing import Optional
 
 
-# ---------------------------------------------------------------------------
-# Contract schema (Pydantic)
-# ---------------------------------------------------------------------------
-
-class ParameterShape(BaseModel):
+@dataclass
+class SemanticContract:
     """
-    Defines an allowed parameter shape for a given intent.
-
-    name    - parameter name (e.g. "path")
-    type    - expected Python type name ("str", "int", "bool", "float")
-    pattern - optional regex the string value must match
-    """
-    name: str
-    type: str = "str"
-    pattern: Optional[str] = None
-
-
-class AgenticSafetyContract(BaseModel):
-    """
-    A safety contract binding an agent to a specific set of capabilities.
+    A semantic contract defines the boundaries of an agent's permitted actions.
 
     Fields:
-        version          - contract schema version (e.g. "v1")
-        agent_id         - the agent this contract is bound to
-        allowed_intents  - list of intent verbs this agent may use
-        allowed_tools    - list of tools this agent may invoke
-        parameter_shapes - per-intent parameter constraints
+        contract_id: Unique identifier.
+        contract_version: Version string.
+        agent_id: The agent this contract governs.
+        allowed_tools: Set of tool IDs the agent may invoke.
+        allowed_actions: Set of action types (e.g., "read", "write", "delete").
+        scope_restrictions: Key-value constraints (e.g., {"region": "US-WEST"}).
+        value_limits: Numeric constraints (e.g., {"max_amount": 10000}).
+        temporal_restrictions: Time-based constraints (e.g., business hours).
+        target_restrictions: Allowed targets (e.g., {"apis": ["internal.*"]}).
     """
-    version: str = "v1"
+    contract_id: str
+    contract_version: str
     agent_id: str
-    allowed_intents: list[str] = Field(default_factory=list)
-    allowed_tools: list[str] = Field(default_factory=list)
-    parameter_shapes: dict[str, list[ParameterShape]] = Field(default_factory=dict)
+    allowed_tools: set = field(default_factory=set)
+    allowed_actions: set = field(default_factory=set)
+    scope_restrictions: dict = field(default_factory=dict)
+    value_limits: dict = field(default_factory=dict)
+    temporal_restrictions: dict = field(default_factory=dict)
+    target_restrictions: dict = field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Validation result
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class ValidationResult:
-    """Outcome of contract validation."""
-    ok: bool
-    decision: str          # "APPROVED" | "REJECTED"
-    reason: str
-
-
-# ---------------------------------------------------------------------------
-# ContractValidator
-# ---------------------------------------------------------------------------
-
-_TYPE_MAP: dict[str, type] = {
-    "str": str,
-    "int": int,
-    "float": float,
-    "bool": bool,
-}
+@dataclass
+class ContractResult:
+    permitted: bool
+    contract_id: str
+    contract_version: str
+    violations: list[str] = field(default_factory=list)
+    error: Optional[str] = None
 
 
 class ContractValidator:
     """
-    Pure, deterministic validator for AgenticSafetyContract.
+    Gate 3: Validate tool requests against semantic contracts.
 
-    OWASP: ASI01 (Prompt/Relay Injection), ASI02 (Excessive Agency),
-           ASI06 (Sensitive Data Exposure)
+    The contract defines what an agent CAN do. The validator checks
+    whether a specific request falls within those bounds.
     """
 
-    def __init__(self) -> None:
-        self._contracts: dict[str, AgenticSafetyContract] = {}
+    def __init__(self):
+        self._contracts: dict[str, SemanticContract] = {}
 
-    def register_contract(self, contract: AgenticSafetyContract) -> None:
-        """Bind a contract to its agent_id."""
+    def register_contract(self, contract: SemanticContract):
         self._contracts[contract.agent_id] = contract
 
-    def get_contract(self, agent_id: str) -> Optional[AgenticSafetyContract]:
-        """Retrieve the contract for an agent, or None."""
-        return self._contracts.get(agent_id)
-
-    def validate_intent(
+    def validate(
         self,
         agent_id: str,
-        intent: str,
-    ) -> ValidationResult:
-        """Check whether an intent is allowed for the given agent."""
-        contract = self._contracts.get(agent_id)
-        if contract is None:
-            return ValidationResult(
-                ok=False,
-                decision="REJECTED",
-                reason=f"No contract registered for agent '{agent_id}'",
-            )
-
-        if intent not in contract.allowed_intents:
-            return ValidationResult(
-                ok=False,
-                decision="REJECTED",
-                reason=(
-                    f"Intent '{intent}' is not allowed for agent '{agent_id}'. "
-                    f"Allowed: {contract.allowed_intents}"
-                ),
-            )
-
-        return ValidationResult(ok=True, decision="APPROVED", reason="Intent is allowed")
-
-    def validate_tool(
-        self,
-        agent_id: str,
-        tool: str,
-    ) -> ValidationResult:
-        """Check whether a tool is allowed for the given agent."""
-        contract = self._contracts.get(agent_id)
-        if contract is None:
-            return ValidationResult(
-                ok=False,
-                decision="REJECTED",
-                reason=f"No contract registered for agent '{agent_id}'",
-            )
-
-        if tool not in contract.allowed_tools:
-            return ValidationResult(
-                ok=False,
-                decision="REJECTED",
-                reason=(
-                    f"Tool '{tool}' is not allowed for agent '{agent_id}'. "
-                    f"Allowed: {contract.allowed_tools}"
-                ),
-            )
-
-        return ValidationResult(ok=True, decision="APPROVED", reason="Tool is allowed")
-
-    def validate_parameters(
-        self,
-        agent_id: str,
-        intent: str,
-        params: dict[str, Any],
-    ) -> ValidationResult:
+        tool_id: str,
+        action: str,
+        request: dict,
+    ) -> ContractResult:
         """
-        Validate parameter shapes for a given intent.
+        Validate a request against the agent's semantic contract.
 
         Checks:
-            1. Each parameter's type matches the shape spec.
-            2. If a regex pattern is defined, the value must match.
+          1. Agent has a registered contract
+          2. Tool is in allowed_tools
+          3. Action is in allowed_actions
+          4. Scope restrictions are satisfied
+          5. Value limits are respected
         """
-        contract = self._contracts.get(agent_id)
-        if contract is None:
-            return ValidationResult(
-                ok=False,
-                decision="REJECTED",
-                reason=f"No contract registered for agent '{agent_id}'",
+        if agent_id not in self._contracts:
+            return ContractResult(
+                permitted=False,
+                contract_id="",
+                contract_version="",
+                error=f"No contract found for agent: {agent_id}",
             )
 
-        shapes = contract.parameter_shapes.get(intent)
-        if shapes is None:
-            # No parameter constraints defined - pass through
-            return ValidationResult(
-                ok=True,
-                decision="APPROVED",
-                reason="No parameter shapes defined for this intent",
+        contract = self._contracts[agent_id]
+        violations = []
+
+        # Check tool allowlist
+        if contract.allowed_tools and tool_id not in contract.allowed_tools:
+            violations.append(
+                f"Tool '{tool_id}' not in allowed_tools: {contract.allowed_tools}"
             )
 
-        for shape in shapes:
-            value = params.get(shape.name)
-            if value is None:
-                return ValidationResult(
-                    ok=False,
-                    decision="REJECTED",
-                    reason=f"Missing required parameter '{shape.name}' for intent '{intent}'",
-                )
+        # Check action allowlist
+        if contract.allowed_actions and action not in contract.allowed_actions:
+            violations.append(
+                f"Action '{action}' not in allowed_actions: {contract.allowed_actions}"
+            )
 
-            expected_type = _TYPE_MAP.get(shape.type)
-            if expected_type is not None and not isinstance(value, expected_type):
-                return ValidationResult(
-                    ok=False,
-                    decision="REJECTED",
-                    reason=(
-                        f"Parameter '{shape.name}' expected type '{shape.type}', "
-                        f"got '{type(value).__name__}'"
-                    ),
-                )
-
-            if shape.pattern is not None and isinstance(value, str):
-                if not re.match(shape.pattern, value):
-                    return ValidationResult(
-                        ok=False,
-                        decision="REJECTED",
-                        reason=(
-                            f"Parameter '{shape.name}' value '{value}' does not match "
-                            f"pattern '{shape.pattern}'"
-                        ),
+        # Check scope restrictions
+        for key, allowed_value in contract.scope_restrictions.items():
+            request_value = request.get(key)
+            if request_value is not None:
+                if isinstance(allowed_value, list):
+                    if request_value not in allowed_value:
+                        violations.append(
+                            f"Scope violation: {key}={request_value}, "
+                            f"allowed={allowed_value}"
+                        )
+                elif request_value != allowed_value:
+                    violations.append(
+                        f"Scope violation: {key}={request_value}, "
+                        f"allowed={allowed_value}"
                     )
 
-        return ValidationResult(
-            ok=True,
-            decision="APPROVED",
-            reason="All parameter shapes valid",
+        # Check value limits
+        for key, max_val in contract.value_limits.items():
+            request_value = request.get(key)
+            if request_value is not None:
+                try:
+                    if float(request_value) > float(max_val):
+                        violations.append(
+                            f"Value limit exceeded: {key}={request_value}, "
+                            f"max={max_val}"
+                        )
+                except (ValueError, TypeError):
+                    pass
+
+        return ContractResult(
+            permitted=len(violations) == 0,
+            contract_id=contract.contract_id,
+            contract_version=contract.contract_version,
+            violations=violations,
         )
 
-    def validate_full(
-        self,
-        agent_id: str,
-        intent: str,
-        tool: str,
-        params: Optional[dict[str, Any]] = None,
-    ) -> ValidationResult:
-        """
-        Full contract validation: intent + tool + parameter shapes.
-        Short-circuits on first failure.
-        """
-        result = self.validate_intent(agent_id, intent)
-        if not result.ok:
-            return result
-
-        result = self.validate_tool(agent_id, tool)
-        if not result.ok:
-            return result
-
-        if params is not None:
-            result = self.validate_parameters(agent_id, intent, params)
-            if not result.ok:
-                return result
-
-        return ValidationResult(
-            ok=True,
-            decision="APPROVED",
-            reason="Contract validation passed",
-        )
+    def get_contract(self, agent_id: str) -> Optional[SemanticContract]:
+        return self._contracts.get(agent_id)

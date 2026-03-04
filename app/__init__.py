@@ -1,10 +1,3 @@
-﻿"""
-LICITRA-SENTRY - Zero-Trust Inter-Agent Communication Control Plane.
+"""LICITRA-SENTRY v0.2 — Runtime Authorization & Audit for Agentic AI"""
 
-Part of the LICITRA research program for cryptographic runtime governance
-of agentic AI systems. LICITRA-SENTRY provides identity attestation,
-content inspection, semantic contract validation, authority enforcement,
-and bridges every decision into LICITRA-MMR for tamper-evident audit.
-"""
-
-__version__ = "0.1.0"
+__version__ = "0.2.0"

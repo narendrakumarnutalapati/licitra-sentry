@@ -1,109 +1,112 @@
-﻿"""
-LICITRA-SENTRY Authority Gate.
+"""
+LICITRA-SENTRY v0.2 — Gate 4: Authority Enforcement
 
-Final authorization check before an agent's action is forwarded.
-Combines identity token validation with contract enforcement to
-produce a single APPROVED/REJECTED decision.
+Enforces the rule: delegation cannot escalate privileges.
 
-OWASP Agentic Coverage:
-    ASI02 - Excessive Agency: Authority gate enforces least-privilege
-            per agent. Agents cannot invoke tools outside their
-            explicit allowed_tools list.
+When Agent A delegates to Agent B, Agent B's effective permissions
+are bounded by Agent A's permissions. This prevents privilege
+laundering through delegation chains.
+
+Author: Narendra Kumar Nutalapati
+License: MIT
 """
 
-from __future__ import annotations
-
-import time
-from dataclasses import dataclass
-
-from app.identity import CovenantNotary, SignedToken
-from app.contract import ContractValidator, ValidationResult
+from dataclasses import dataclass, field
+from typing import Optional
 
 
-# ---------------------------------------------------------------------------
-# Decision model
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class AuthorityDecision:
-    """Outcome of the authority gate check."""
-    decision: str          # "APPROVED" | "REJECTED"
-    reason: str
-    checked_at: float
+@dataclass
+class AuthorityResult:
+    authorized: bool
+    effective_permissions: set = field(default_factory=set)
+    delegation_chain: list[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
+    error: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# AuthorityGate
-# ---------------------------------------------------------------------------
-
-class AuthorityGate:
+class AuthorityEnforcer:
     """
-    Validates that an agent holds a valid token AND that the requested
-    intent and tool are permitted by the agent's contract.
+    Gate 4: Enforce authority constraints on delegation.
 
-    OWASP: ASI02 (Excessive Agency)
+    Rules:
+      1. An agent can only perform actions within its own permissions.
+      2. When delegating, the delegatee's permissions are the INTERSECTION
+         of the delegator's permissions and the delegatee's own permissions.
+      3. Delegation depth is bounded (default: 3 levels).
     """
 
-    def __init__(
+    MAX_DELEGATION_DEPTH = 3
+
+    def __init__(self):
+        self._permissions: dict[str, set] = {}
+        self._delegations: dict[str, str] = {}  # agent -> delegator
+
+    def register_permissions(self, agent_id: str, permissions: set):
+        self._permissions[agent_id] = permissions
+
+    def register_delegation(self, delegatee_id: str, delegator_id: str):
+        self._delegations[delegatee_id] = delegator_id
+
+    def evaluate(
         self,
-        notary: CovenantNotary,
-        contract_validator: ContractValidator,
-    ) -> None:
-        self._notary = notary
-        self._contract_validator = contract_validator
-
-    def check(
-        self,
-        token: SignedToken,
-        intent: str,
-        tool: str,
-    ) -> AuthorityDecision:
+        agent_id: str,
+        requested_action: str,
+        tool_id: str,
+    ) -> AuthorityResult:
         """
-        Run the authority check.
-
-        Steps:
-            1. Validate the token (signature + expiry) via CovenantNotary.
-            2. Validate intent is in contract via ContractValidator.
-            3. Validate tool is in contract via ContractValidator.
-
-        Returns AuthorityDecision with the first failure reason,
-        or APPROVED if all checks pass.
+        Evaluate whether an agent has authority for the requested action,
+        considering the full delegation chain.
         """
-        now = time.time()
+        # Build delegation chain
+        chain = [agent_id]
+        current = agent_id
+        while current in self._delegations:
+            delegator = self._delegations[current]
+            chain.append(delegator)
+            current = delegator
+            if len(chain) > self.MAX_DELEGATION_DEPTH + 1:
+                return AuthorityResult(
+                    authorized=False,
+                    delegation_chain=chain,
+                    violations=[
+                        f"Delegation depth {len(chain)-1} exceeds maximum "
+                        f"{self.MAX_DELEGATION_DEPTH}"
+                    ],
+                )
 
-        # 1. Token validation
-        token_valid, token_reason = self._notary.validate_token(token)
-        if not token_valid:
-            return AuthorityDecision(
-                decision="REJECTED",
-                reason=f"Identity check failed: {token_reason}",
-                checked_at=now,
-            )
+        # Compute effective permissions (intersection along chain)
+        effective = None
+        violations = []
 
-        # 2. Intent validation
-        intent_result: ValidationResult = self._contract_validator.validate_intent(
-            token.agent_id, intent
+        for aid in chain:
+            perms = self._permissions.get(aid, set())
+            if effective is None:
+                effective = set(perms)
+            else:
+                effective = effective.intersection(perms)
+
+        effective = effective or set()
+
+        # Check if requested action + tool is within effective permissions
+        action_key = f"{tool_id}:{requested_action}"
+        tool_wildcard = f"{tool_id}:*"
+        global_wildcard = "*:*"
+
+        has_permission = (
+            action_key in effective
+            or tool_wildcard in effective
+            or global_wildcard in effective
         )
-        if not intent_result.ok:
-            return AuthorityDecision(
-                decision="REJECTED",
-                reason=f"Contract check failed: {intent_result.reason}",
-                checked_at=now,
+
+        if not has_permission:
+            violations.append(
+                f"Action '{action_key}' not in effective permissions. "
+                f"Effective: {effective}"
             )
 
-        # 3. Tool validation
-        tool_result: ValidationResult = self._contract_validator.validate_tool(
-            token.agent_id, tool
-        )
-        if not tool_result.ok:
-            return AuthorityDecision(
-                decision="REJECTED",
-                reason=f"Contract check failed: {tool_result.reason}",
-                checked_at=now,
-            )
-
-        return AuthorityDecision(
-            decision="APPROVED",
-            reason="Authority check passed: token valid, intent and tool allowed",
-            checked_at=now,
+        return AuthorityResult(
+            authorized=has_permission,
+            effective_permissions=effective,
+            delegation_chain=chain,
+            violations=violations,
         )
