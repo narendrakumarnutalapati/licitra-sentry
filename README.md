@@ -199,7 +199,7 @@ demo_witness.py
 
 ---
 
-# OWASP Agentic Top 10 Mapping
+## OWASP Agentic Top 10 Mapping
 
 | ASI Category | SENTRY Control |
 |-------------|----------------|
@@ -207,12 +207,12 @@ demo_witness.py
 | ASI02: Tool Misuse | Ticket request hash + content inspection |
 | ASI03: Identity & Privilege Abuse | Identity + authority with delegation bounds |
 | ASI04: Supply Chain | Identity rejects unregistered components |
-| ASI05: Insecure Inter-Agent Communication | Identity verification and auditable messaging |
+| ASI05: Unexpected Code Execution | Content inspection + contract |
 | ASI06: Memory & Context Poisoning | Hash-chained audit + witness receipts |
-| ASI07: Unexpected Code Execution | Content inspection + contract |
-| ASI08: Cascading Failures | Per-gate audit enables failure tracing |
+| ASI07: Insecure Inter-Agent Comm. | Identity at every boundary + audit |
+| ASI08: Cascading Failures | Per-gate audit for failure tracing |
 | ASI09: Human-Agent Trust Exploitation | Authorization committed as verifiable artifacts |
-| ASI10: Rogue Agents | Contract + authority enforcement + audit trail |
+| ASI10: Rogue Agents | Contract + authority + audit trail |
 
 ---
 
