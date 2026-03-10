@@ -21,3 +21,16 @@ env/
 .vscode/
 *.db
 *.sqlite3
+# LICITRA runtime artifacts
+data/*.jsonl
+data/*.log
+
+# cryptographic material
+keys/*.pem
+keys/*.key
+keys/*.priv
+
+# backup artifacts
+*.bak
+# Runtime key material
+keys/

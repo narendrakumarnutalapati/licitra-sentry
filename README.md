@@ -52,7 +52,7 @@ SENTRY provides the missing enforcement layer: **cryptographic proof that the au
 ## Architecture
 
 <p align="center">
-  <img src="docs/fig1_architecture.png" width="850">
+  <img src="docs/architecture.png" width="850">
 </p>
 
 *Figure 1 — LICITRA-SENTRY authorization pipeline enforcing complete mediation for AI agent tool execution. Every tool invocation traverses the full pipeline. If any gate rejects, execution is denied and the rejection is committed to the audit ledger.*
@@ -304,7 +304,7 @@ licitra-sentry/
 │   └── licitra_sentry_TR-2026-02_v0.1_FINAL.pdf   # Technical report (PDF)
 │
 ├── docs/                             # Architecture diagrams
-│   └── fig1_architecture.png        # System architecture diagram (Figure 1)
+│   └── architecture.png              # System architecture diagram
 │
 ├── demo_ticket_execution.py         # Interactive demo: execution ticket flow
 ├── demo_witness.py                  # Interactive demo: witness transparency

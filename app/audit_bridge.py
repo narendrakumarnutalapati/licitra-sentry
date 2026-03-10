@@ -63,7 +63,19 @@ class AuditBridge:
         anchor_manager: Optional[AnchorManager] = None,
         witness_client: Optional["WitnessClient"] = None,
         epoch_size: int = 10,
+        mmr_base_url: Optional[str] = None,
+        org_id: Optional[str] = None,
     ):
+        """
+        Supports both:
+          v0.2 core API
+          v0.1-compat experiment API
+        """
+
+        # Legacy experiment parameters are accepted but ignored
+        self.mmr_base_url = mmr_base_url
+        self.org_id = org_id
+
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.anchor_manager = anchor_manager
@@ -223,3 +235,45 @@ class AuditBridge:
 
     def get_event_count(self) -> int:
         return self._event_count
+
+
+# ---------------------------------------------------------------------------
+# Legacy compatibility API (v0.1-compat)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AuditResult:
+    staged_id: int
+    event_id: str
+    leaf_hash: str
+
+
+def emit(self, event: dict) -> AuditResult:
+    """
+    Legacy middleware-compatible audit emitter.
+
+    Converts a dict event into an AuditEvent and commits it to the
+    append-only audit chain. Returns a structure compatible with
+    the older experiment suite.
+    """
+    audit_event = AuditEvent(
+        event_id=f"legacy-{int(time.time() * 1000)}",
+        event_type="middleware_event",
+        timestamp=time.time(),
+        agent_id=event.get("agent_id", "unknown"),
+        tool_id=event.get("tool", ""),
+        gate=event.get("gate_fired", ""),
+        decision=event.get("decision", "").lower(),
+        details=event,
+    )
+
+    leaf_hash = self.commit(audit_event)
+
+    return AuditResult(
+        staged_id=self._event_count,
+        event_id=audit_event.event_id,
+        leaf_hash=leaf_hash,
+    )
+
+
+AuditBridge.emit = emit

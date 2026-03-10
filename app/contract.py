@@ -142,3 +142,156 @@ class ContractValidator:
 
     def get_contract(self, agent_id: str) -> Optional[SemanticContract]:
         return self._contracts.get(agent_id)
+
+# ---------------------------------------------------------------------------
+# Legacy compatibility API (v0.1-compat)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ParameterShape:
+    name: str
+    type: str
+
+
+@dataclass
+class AgenticSafetyContract:
+    agent_id: str
+    allowed_intents: list[str] = field(default_factory=list)
+    allowed_tools: list[str] = field(default_factory=list)
+    parameter_shapes: dict[str, list[ParameterShape]] = field(default_factory=dict)
+    contract_id: str = ""
+    contract_version: str = "v1"
+
+    def to_semantic_contract(self) -> SemanticContract:
+        return SemanticContract(
+            contract_id=self.contract_id or f"legacy-{self.agent_id}",
+            contract_version=self.contract_version,
+            agent_id=self.agent_id,
+            allowed_tools=set(self.allowed_tools),
+            allowed_actions=set(self.allowed_intents),
+        )
+
+
+@dataclass
+class LegacyValidationResult:
+    ok: bool
+    reason: str = ""
+
+
+def _normalize_type_name(value) -> str:
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, dict):
+        return "dict"
+    if isinstance(value, list):
+        return "list"
+    return type(value).__name__
+
+
+def _register_contract_compat(self, contract):
+    if isinstance(contract, AgenticSafetyContract):
+        self._contracts[contract.agent_id] = contract
+    else:
+        self._contracts[contract.agent_id] = contract
+
+
+def _validate_intent_compat(self, agent_id: str, intent: str) -> LegacyValidationResult:
+    contract = self._contracts.get(agent_id)
+    if contract is None:
+        return LegacyValidationResult(ok=False, reason=f"No contract found for agent: {agent_id}")
+
+    if isinstance(contract, AgenticSafetyContract):
+        if intent not in contract.allowed_intents:
+            return LegacyValidationResult(
+                ok=False,
+                reason=f"Intent '{intent}' not allowed for agent {agent_id}"
+            )
+        return LegacyValidationResult(ok=True, reason="OK")
+
+    if isinstance(contract, SemanticContract):
+        if contract.allowed_actions and intent not in contract.allowed_actions:
+            return LegacyValidationResult(
+                ok=False,
+                reason=f"Action '{intent}' not allowed for agent {agent_id}"
+            )
+        return LegacyValidationResult(ok=True, reason="OK")
+
+    return LegacyValidationResult(ok=False, reason="Unsupported contract type")
+
+
+def _validate_full_compat(
+    self,
+    agent_id: str,
+    intent: str,
+    tool: str,
+    params: Optional[dict] = None,
+) -> LegacyValidationResult:
+    contract = self._contracts.get(agent_id)
+    if contract is None:
+        return LegacyValidationResult(ok=False, reason=f"No contract found for agent: {agent_id}")
+
+    params = params or {}
+
+    if isinstance(contract, AgenticSafetyContract):
+        if intent not in contract.allowed_intents:
+            return LegacyValidationResult(
+                ok=False,
+                reason=f"Intent '{intent}' not allowed for agent {agent_id}"
+            )
+
+        if tool not in contract.allowed_tools:
+            return LegacyValidationResult(
+                ok=False,
+                reason=f"Tool '{tool}' not allowed for agent {agent_id}"
+            )
+
+        expected_shapes = contract.parameter_shapes.get(intent, [])
+        for shape in expected_shapes:
+            if shape.name not in params:
+                return LegacyValidationResult(
+                    ok=False,
+                    reason=f"Missing required parameter '{shape.name}' for intent '{intent}'"
+                )
+
+            actual_type = _normalize_type_name(params[shape.name])
+            if actual_type != shape.type:
+                return LegacyValidationResult(
+                    ok=False,
+                    reason=(
+                        f"Parameter '{shape.name}' has type '{actual_type}', "
+                        f"expected '{shape.type}'"
+                    ),
+                )
+
+        return LegacyValidationResult(ok=True, reason="OK")
+
+    if isinstance(contract, SemanticContract):
+        result = self.validate(
+            agent_id=agent_id,
+            tool_id=tool,
+            action=intent,
+            request=params,
+        )
+        if result.permitted:
+            return LegacyValidationResult(ok=True, reason="OK")
+        if result.error:
+            return LegacyValidationResult(ok=False, reason=result.error)
+        return LegacyValidationResult(
+            ok=False,
+            reason="; ".join(result.violations) if result.violations else "Contract validation failed",
+        )
+
+    return LegacyValidationResult(ok=False, reason="Unsupported contract type")
+
+
+# Monkey-patch compatibility methods onto ContractValidator without
+# disturbing the current v0.2 validate(...) API.
+ContractValidator.register_contract = _register_contract_compat
+ContractValidator.validate_intent = _validate_intent_compat
+ContractValidator.validate_full = _validate_full_compat

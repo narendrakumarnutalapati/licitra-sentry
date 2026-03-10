@@ -110,3 +110,64 @@ class AuthorityEnforcer:
             delegation_chain=chain,
             violations=violations,
         )
+
+# ---------------------------------------------------------------------------
+# Legacy compatibility API (v0.1-compat)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AuthorityDecision:
+    decision: str
+    reason: str
+    effective_permissions: set = field(default_factory=set)
+    delegation_chain: list[str] = field(default_factory=list)
+
+
+class AuthorityGate:
+    """
+    Legacy middleware-compatible authority facade.
+
+    Uses the registered contract as the approval source for the older
+    experiment pipeline. This is additive and does not replace the
+    v0.2 AuthorityEnforcer path.
+    """
+
+    def __init__(self, notary, contract_validator):
+        self._notary = notary
+        self._contract_validator = contract_validator
+
+    def check(self, token, intent: str, tool: str) -> AuthorityDecision:
+        contract = None
+        if hasattr(self._contract_validator, "_contracts"):
+            contract = self._contract_validator._contracts.get(token.agent_id)
+
+        if contract is None:
+            return AuthorityDecision(
+                decision="REJECTED",
+                reason=f"No contract registered for agent {token.agent_id}",
+            )
+
+        allowed_intents = getattr(contract, "allowed_intents", None)
+        if allowed_intents is None and hasattr(contract, "allowed_actions"):
+            allowed_intents = list(contract.allowed_actions)
+
+        allowed_tools = getattr(contract, "allowed_tools", None)
+        if allowed_tools is None:
+            allowed_tools = []
+
+        if allowed_intents and intent not in allowed_intents:
+            return AuthorityDecision(
+                decision="REJECTED",
+                reason=f"Intent '{intent}' not allowed for agent {token.agent_id}",
+            )
+
+        if allowed_tools and tool not in allowed_tools:
+            return AuthorityDecision(
+                decision="REJECTED",
+                reason=f"Tool '{tool}' not allowed for agent {token.agent_id}",
+            )
+
+        return AuthorityDecision(
+            decision="APPROVED",
+            reason="Authority granted",
+        )
