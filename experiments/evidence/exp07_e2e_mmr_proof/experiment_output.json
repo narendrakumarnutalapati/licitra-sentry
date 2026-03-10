@@ -1,0 +1,19 @@
+{
+  "experiment": "EXP-E2E-MMR-PROOF",
+  "org_id": "sentry-e2e-proof",
+  "decision": "APPROVED",
+  "gate": "approved",
+  "mmr_staged_id": 39243,
+  "mmr_event_id": "bf349de1-3189-4f02-a0de-1940fd7c647c",
+  "leaf_hash": "017fd3b796dc001104691d91d9db67e0e4320f05f3205ff322180be4b48e345f",
+  "verify_ok": true,
+  "verify_epochs": 1,
+  "verify_total_events": 2,
+  "last_epoch_hash": "34286856a1e27162f86fbc36a0631883b586da2c4f0b7d844369745afb4cdb26",
+  "proof_event_id": "bf349de1-3189-4f02-a0de-1940fd7c647c",
+  "proof_leaf_hash": "017fd3b796dc001104691d91d9db67e0e4320f05f3205ff322180be4b48e345f",
+  "proof_mmr_root": "0bfe3cbeca4f74559a748392a0e02cfb58a6174beaf13c5fffbf33c1ad8d404d",
+  "proof_epoch_hash": "34286856a1e27162f86fbc36a0631883b586da2c4f0b7d844369745afb4cdb26",
+  "proof_path_len": 1,
+  "verdict": "CONFIRMED"
+}

@@ -34,3 +34,13 @@ keys/*.priv
 *.bak
 # Runtime key material
 keys/
+
+# nested python caches
+**/__pycache__/
+
+# runtime sqlite databases
+data/*.db
+
+# experiment runtime output
+experiments/evidence/*.json
+experiments/evidence/*.log

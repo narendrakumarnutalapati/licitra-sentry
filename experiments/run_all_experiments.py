@@ -1,5 +1,5 @@
 """
-LICITRA-SENTRY - Run All 6 Experiments
+LICITRA-SENTRY - Run All 10 Experiments
 Requires LICITRA-MMR at http://localhost:8000
 
 Usage:
@@ -21,6 +21,10 @@ experiments = [
     ("EXP-04", "experiments/run_exp04_relay_injection.py"),
     ("EXP-05", "experiments/run_exp05_pii_exfiltration.py"),
     ("EXP-06", "experiments/run_exp06_unauthorized_delegation.py"),
+    ("EXP-07", "experiments/run_exp07_e2e_mmr_proof.py"),
+    ("EXP-08", "experiments/run_exp08_ticket_replay.py"),
+    ("EXP-09", "experiments/run_exp09_payload_tampering.py"),
+    ("EXP-10", "experiments/run_exp10_audit_tampering.py"),
 ]
 
 print("\n" + "=" * 60)
@@ -43,5 +47,5 @@ for exp_id, status in results.items():
 print("=" * 60)
 
 all_pass = all(v == "PASS" for v in results.values())
-print(f"\n  {'ALL 6/6 EXPERIMENTS PASSED' if all_pass else 'SOME EXPERIMENTS FAILED'}")
+print(f"\n  {'ALL 10/10 EXPERIMENTS PASSED' if all_pass else 'SOME EXPERIMENTS FAILED'}")
 sys.exit(0 if all_pass else 1)

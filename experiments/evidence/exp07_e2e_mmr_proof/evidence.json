@@ -1,0 +1,78 @@
+{
+    "summary":  {
+                    "org_id":  "sentry-e2e-proof",
+                    "ledger_version":  "mmr-v0.1",
+                    "hash_alg":  "SHA256",
+                    "block_size":  2,
+                    "verified_at":  "2026-03-10T07:50:25.153526+00:00",
+                    "ok":  true,
+                    "epochs":  1,
+                    "total_events":  2,
+                    "last_epoch_hash":  "1313dcdfd31cb46bb25cd2e67a2001ac499bcdf0d410908561edc3eb5f5f141e",
+                    "bad_epoch_index":  null,
+                    "reason":  null,
+                    "bundle_sha256":  "bca8bf5a70b04f5d55ad2f6c9cc0ce011e4a7b1859a771a6c3d8e55adc402a4b"
+                },
+    "epochs":  [
+                   {
+                       "epoch_id":  0,
+                       "start_seq":  1,
+                       "end_seq":  2,
+                       "event_count":  2,
+                       "mmr_root":  "bc981a56668941ad58011d62fac09ff035b966b3fff93b57f2de6128377034e5",
+                       "prev_epoch_hash":  "0000000000000000000000000000000000000000000000000000000000000000",
+                       "epoch_hash":  "1313dcdfd31cb46bb25cd2e67a2001ac499bcdf0d410908561edc3eb5f5f141e",
+                       "created_at":  "2026-03-10T00:34:10.477190-07:00"
+                   }
+               ],
+    "last_20_events":  [
+                           {
+                               "event_id":  "44896389-2b3c-4754-bd49-576446e7c964",
+                               "seq":  1,
+                               "epoch_id":  0,
+                               "leaf_hash":  "19d2d0dc41519580e2a70a66845f17434b3ed1a454a6f114a8f09ccee5c93216",
+                               "created_at":  "2026-03-10T00:34:06.324043-07:00"
+                           },
+                           {
+                               "event_id":  "d3626fa0-22cd-4b94-bcac-422659e79c13",
+                               "seq":  2,
+                               "epoch_id":  0,
+                               "leaf_hash":  "0fe193089279a071ae9fa3c9ff3f3ec05acc3a63dab72989ead4c1d0352e2ed8",
+                               "created_at":  "2026-03-10T00:34:10.468268-07:00"
+                           }
+                       ],
+    "proof_example":  {
+                          "org_id":  "sentry-e2e-proof",
+                          "event_id":  "d3626fa0-22cd-4b94-bcac-422659e79c13",
+                          "epoch_id":  0,
+                          "leaf_hash":  "0fe193089279a071ae9fa3c9ff3f3ec05acc3a63dab72989ead4c1d0352e2ed8",
+                          "mmr_root":  "bc981a56668941ad58011d62fac09ff035b966b3fff93b57f2de6128377034e5",
+                          "proof_path":  [
+                                             {
+                                                 "hash":  "19d2d0dc41519580e2a70a66845f17434b3ed1a454a6f114a8f09ccee5c93216",
+                                                 "side":  "left"
+                                             }
+                                         ],
+                          "epoch_hash":  "1313dcdfd31cb46bb25cd2e67a2001ac499bcdf0d410908561edc3eb5f5f141e"
+                      },
+    "last_20_staged":  [
+                           {
+                               "id":  39242,
+                               "agent_id":  "researcher",
+                               "status":  "APPROVED",
+                               "decision_reason":  "All policy checks passed",
+                               "risk_score":  0.0,
+                               "policy_version":  "v0.1",
+                               "created_at":  "2026-03-10T00:34:08.392011-07:00"
+                           },
+                           {
+                               "id":  39241,
+                               "agent_id":  "researcher",
+                               "status":  "APPROVED",
+                               "decision_reason":  "All policy checks passed",
+                               "risk_score":  0.0,
+                               "policy_version":  "v0.1",
+                               "created_at":  "2026-03-10T00:34:04.248011-07:00"
+                           }
+                       ]
+}
