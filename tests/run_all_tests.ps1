@@ -1,33 +1,43 @@
-# LICITRA-SENTRY - Run All Tests
+# LICITRA-SENTRY v0.2 - Run Current Test Suites
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  LICITRA-SENTRY Test Suite" -ForegroundColor Cyan
+Write-Host "  LICITRA-SENTRY v0.2 Test Suite" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
+$ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$env:PYTHONPATH = $projectRoot
+
 $tests = @(
-    "t01_identity",
-    "t02_contract",
-    "t03_authority",
-    "t04_content_inspector",
-    "t05_middleware",
-    "t06_audit_bridge",
-    "t07_swarm_scenarios",
-    "t08_determinism",
-    "t09_owasp_coverage"
+    @{
+        Name = "test_sentry_v02"
+        Cmd  = "python `"$PSScriptRoot\test_sentry_v02.py`""
+    },
+    @{
+        Name = "test_witness"
+        Cmd  = "python `"$PSScriptRoot\test_witness.py`""
+    }
 )
 
 $results = @{}
 $allPassed = $true
 
 foreach ($t in $tests) {
-    Write-Host "Running $t..." -ForegroundColor Yellow
-    powershell -ExecutionPolicy Bypass -File "$PSScriptRoot/$t.ps1" 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $results[$t] = "PASS"
-        Write-Host "  $t : PASS" -ForegroundColor Green
-    } else {
-        $results[$t] = "FAIL"
+    Write-Host "Running $($t.Name)..." -ForegroundColor Yellow
+    try {
+        Invoke-Expression $t.Cmd
+        if ($LASTEXITCODE -eq 0) {
+            $results[$t.Name] = "PASS"
+            Write-Host "  $($t.Name) : PASS" -ForegroundColor Green
+        } else {
+            $results[$t.Name] = "FAIL"
+            $allPassed = $false
+            Write-Host "  $($t.Name) : FAIL" -ForegroundColor Red
+        }
+    } catch {
+        $results[$t.Name] = "FAIL"
         $allPassed = $false
-        Write-Host "  $t : FAIL" -ForegroundColor Red
+        Write-Host "  $($t.Name) : FAIL" -ForegroundColor Red
+        Write-Host "    $($_.Exception.Message)" -ForegroundColor DarkRed
     }
 }
 
@@ -35,17 +45,17 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  RESULTS" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 foreach ($t in $tests) {
-    $status = $results[$t]
+    $status = $results[$t.Name]
     $color = if ($status -eq "PASS") { "Green" } else { "Red" }
-    Write-Host "  $t : $status" -ForegroundColor $color
+    Write-Host "  $($t.Name) : $status" -ForegroundColor $color
 }
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 if ($allPassed) {
-    Write-Host "  ALL 9/9 TESTS PASSED" -ForegroundColor Green
+    Write-Host "  ALL 2/2 CURRENT TEST SUITES PASSED" -ForegroundColor Green
     exit 0
 } else {
     $failCount = ($results.Values | Where-Object { $_ -eq "FAIL" }).Count
-    Write-Host "  $failCount TEST(S) FAILED" -ForegroundColor Red
+    Write-Host "  $failCount TEST SUITE(S) FAILED" -ForegroundColor Red
     exit 1
 }

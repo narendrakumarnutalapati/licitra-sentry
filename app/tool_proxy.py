@@ -26,6 +26,7 @@ import time
 import sqlite3
 import hashlib
 import logging
+import threading
 from dataclasses import dataclass, asdict, field
 from typing import Callable, Optional, Any
 from pathlib import Path
@@ -57,15 +58,17 @@ class ReplayStore:
 
     def __init__(self, db_path: str = "data/replay.db"):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS used_tickets (
-                jti TEXT PRIMARY KEY,
-                exp REAL NOT NULL,
-                used_at REAL NOT NULL
-            )
-        """)
-        self.conn.commit()
+        self._lock = threading.Lock()
+        self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
+        with self._lock:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS used_tickets (
+                    jti TEXT PRIMARY KEY,
+                    exp REAL NOT NULL,
+                    used_at REAL NOT NULL
+                )
+            """)
+            self.conn.commit()
 
     def check_and_mark(self, jti: str, exp: float) -> bool:
         """
@@ -75,25 +78,28 @@ class ReplayStore:
             True if the ticket is fresh (not replayed).
             False if the JTI was already used (replay detected).
         """
-        try:
-            self.conn.execute(
-                "INSERT INTO used_tickets (jti, exp, used_at) VALUES (?, ?, ?)",
-                (jti, exp, time.time()),
-            )
-            self.conn.commit()
-            return True
-        except sqlite3.IntegrityError:
-            return False
+        with self._lock:
+            try:
+                self.conn.execute(
+                    "INSERT INTO used_tickets (jti, exp, used_at) VALUES (?, ?, ?)",
+                    (jti, exp, time.time()),
+                )
+                self.conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
 
     def purge_expired(self):
         """Remove entries for tickets that have expired (housekeeping)."""
-        self.conn.execute(
-            "DELETE FROM used_tickets WHERE exp < ?", (time.time(),)
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "DELETE FROM used_tickets WHERE exp < ?", (time.time(),)
+            )
+            self.conn.commit()
 
     def close(self):
-        self.conn.close()
+        with self._lock:
+            self.conn.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -341,3 +347,5 @@ class ToolProxy:
             execution_time_ms=exec_ms,
             audit_event=audit_event,
         )
+
+

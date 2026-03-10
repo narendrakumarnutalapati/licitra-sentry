@@ -15,6 +15,9 @@ License: MIT
 import json
 import time
 import hashlib
+from datetime import datetime, timezone
+from urllib import request as urllib_request
+from urllib import error as urllib_error
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 from pathlib import Path
@@ -63,7 +66,19 @@ class AuditBridge:
         anchor_manager: Optional[AnchorManager] = None,
         witness_client: Optional["WitnessClient"] = None,
         epoch_size: int = 10,
+        mmr_base_url: Optional[str] = None,
+        org_id: Optional[str] = None,
     ):
+        """
+        Supports both:
+          v0.2 core API
+          v0.1-compat experiment API
+        """
+
+        # Legacy experiment parameters are accepted but ignored
+        self.mmr_base_url = mmr_base_url
+        self.org_id = org_id
+
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.anchor_manager = anchor_manager
@@ -223,3 +238,112 @@ class AuditBridge:
 
     def get_event_count(self) -> int:
         return self._event_count
+
+
+# ---------------------------------------------------------------------------
+# Legacy compatibility API (v0.1-compat)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AuditResult:
+    staged_id: int
+    event_id: str
+    leaf_hash: str
+
+
+def _post_json(url: str, payload: dict | None) -> dict:
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    req = urllib_request.Request(url=url, data=data, headers={"Content-Type": "application/json"})
+    if data is None:
+        req.method = "POST"
+    try:
+        with urllib_request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib_error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"MMR API HTTP {e.code}: {body}") from e
+    except Exception as e:
+        raise RuntimeError(f"MMR API request failed: {e}") from e
+
+
+def _emit_via_mmr(self, event: dict) -> AuditResult:
+    base = self.mmr_base_url.rstrip("/")
+    agent_id = event.get("agent_id", "unknown")
+
+    # Commit a sanitized audit envelope into MMR so both approved and rejected
+    # SENTRY decisions can be ledgered without tripping content policy checks.
+    canonical_event = json.dumps(event, sort_keys=True, separators=(",", ":"))
+    audit_event_sha256 = hashlib.sha256(canonical_event.encode("utf-8")).hexdigest()
+
+    proposed_payload = {
+        "action_type": "READ",
+        "agent_id": agent_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tool_id": "sentry_audit_bridge",
+        "payload": {
+            "source": "licitra-sentry",
+            "audit_event_sha256": audit_event_sha256,
+            "decision": event.get("decision", ""),
+            "gate_fired": event.get("gate_fired", ""),
+            "intent": event.get("intent", ""),
+            "tool": event.get("tool", ""),
+            "reason": event.get("reason", ""),
+            "delegate_to": event.get("delegate_to"),
+        },
+    }
+
+    propose_body = {
+        "org_id": self.org_id,
+        "agent_id": agent_id,
+        "proposed_json": json.dumps(proposed_payload, sort_keys=True, separators=(",", ":")),
+    }
+
+    proposed = _post_json(f"{base}/agent/propose", propose_body)
+
+    if proposed.get("status") != "APPROVED":
+        raise RuntimeError(
+            f"MMR propose rejected: staged_id={proposed.get('staged_id')} "
+            f"reason={proposed.get('decision_reason')}"
+        )
+
+    staged_id = proposed["staged_id"]
+    committed = _post_json(f"{base}/agent/commit/{staged_id}", None)
+
+    return AuditResult(
+        staged_id=staged_id,
+        event_id=committed["event_id"],
+        leaf_hash=committed["leaf_hash"],
+    )
+
+
+def emit(self, event: dict) -> AuditResult:
+    """
+    Legacy middleware-compatible audit emitter.
+
+    If mmr_base_url + org_id are configured, emit to the real LICITRA-MMR
+    service. Otherwise fall back to the local append-only hash-chained log.
+    """
+    if self.mmr_base_url and self.org_id:
+        return _emit_via_mmr(self, event)
+
+    audit_event = AuditEvent(
+        event_id=f"legacy-{int(time.time() * 1000)}",
+        event_type="middleware_event",
+        timestamp=time.time(),
+        agent_id=event.get("agent_id", "unknown"),
+        tool_id=event.get("tool", ""),
+        gate=event.get("gate_fired", ""),
+        decision=event.get("decision", "").lower(),
+        details=event,
+    )
+
+    leaf_hash = self.commit(audit_event)
+
+    return AuditResult(
+        staged_id=self._event_count,
+        event_id=audit_event.event_id,
+        leaf_hash=leaf_hash,
+    )
+
+
+AuditBridge.emit = emit

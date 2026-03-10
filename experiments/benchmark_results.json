@@ -2,76 +2,39 @@
   "metadata": {
     "python": "3.12.7 (tags/v3.12.7:0b05ead, Oct  1 2024, 03:06:41) [MSC v.1941 64 bit (AMD64)]",
     "platform": "win32",
-    "ts": "2026-03-02T09:17:44Z"
+    "ts": "2026-03-10T10:12:01Z",
+    "benchmark_version": "v0.2"
   },
-  "b1_concurrent": {
-    "sequential": {
-      "rps": 3564,
-      "p50": 0.291,
-      "p95": 0.394,
-      "p99": 0.501,
-      "decisions": {
-        "APPROVED": 723,
-        "REJECTED": 277
-      },
-      "gates": {
-        "approved": 723,
-        "contract": 157,
-        "inspector": 78,
-        "identity": 42
-      }
+  "b1_sequential_full_pipeline": {
+    "count": 1000,
+    "rps": 221,
+    "p50_ms": 4.352,
+    "p95_ms": 5.85,
+    "p99_ms": 7.45,
+    "decisions": {
+      "APPROVED": 1000,
+      "REJECTED": 0
     },
-    "concurrent": {
-      "10": {
-        "threads": 10,
-        "rps": 1723,
-        "p50": 0.508,
-        "p95": 1.023,
-        "p99": 97.343
-      },
-      "20": {
-        "threads": 20,
-        "rps": 1797,
-        "p50": 0.304,
-        "p95": 0.9,
-        "p99": 49.851
-      },
-      "50": {
-        "threads": 50,
-        "rps": 2568,
-        "p50": 19.392,
-        "p95": 20.973,
-        "p99": 21.672
-      }
-    },
-    "mmr_events": 3866,
-    "epochs": 38
+    "audit_events": 5000
   },
-  "b2_signed_epochs": {
-    "epochs": 5,
-    "all_valid": true,
-    "tamper_detected": true,
-    "sign_p50_ms": 0.041,
-    "sign_p99_ms": 0.052,
-    "verify_p50_ms": 0.14,
-    "amortized_ms": 0.0004
+  "b2_concurrent_full_pipeline": {
+    "count": 1000,
+    "threads": 20,
+    "rps": 329,
+    "p50_ms": 60.087,
+    "p95_ms": 66.833,
+    "p99_ms": 79.836,
+    "decisions": {
+      "APPROVED": 1000,
+      "REJECTED": 0
+    },
+    "audit_events": 10000
   },
-  "b3_failure_injection": {
-    "f1_mmr_unavailable": {
-      "PASS": true
-    },
-    "f2_corruption": {
-      "PASS": true
-    },
-    "f3_deletion": {
-      "PASS": true
-    },
-    "f4_replay": {
-      "PASS": true,
-      "known_limitation": true
-    },
-    "f5_contention": {
-      "PASS": true
-    }
+  "b3_security_failure_checks": {
+    "replay_first_allowed": true,
+    "replay_second_allowed": false,
+    "replay_second_error": "REPLAY_DETECTED: Ticket e18c5c80-7db2-4902-a513-36d8ee3e4e90 has already been used",
+    "tamper_allowed": false,
+    "tamper_error": "TICKET_INVALID: Request hash mismatch: payload modified after authorization"
   }
 }

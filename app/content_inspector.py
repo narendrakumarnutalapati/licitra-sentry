@@ -13,13 +13,28 @@ import json
 from dataclasses import dataclass, field
 from typing import Optional
 
+@dataclass
+class Finding:
+    rule_id: str
+    rule_name: str
+    category: str
+    severity: str
+    action: str
 
 @dataclass
 class InspectionResult:
     passed: bool
-    findings: list[str] = field(default_factory=list)
+    findings: list = field(default_factory=list)
     risk_level: str = "none"  # none, low, medium, high, critical
     error: Optional[str] = None
+
+    @property
+    def clean(self) -> bool:
+        return self.passed
+
+    @property
+    def severity(self) -> str:
+        return self.risk_level
 
 
 # Default patterns for content inspection
@@ -54,6 +69,12 @@ DEFAULT_PATTERNS = {
         "risk": "high",
         "description": "Path traversal pattern detected",
     },
+    "prompt_injection": {
+        "pattern": r"(ignore\s+all\s+previous\s+instructions|ignore\s+previous\s+instructions|forget\s+previous\s+instructions|disregard\s+the\s+above|override\s+system\s+prompt|delete\s+the\s+database)",
+        "risk": "critical",
+        "description": "Prompt injection / relay injection pattern detected",
+    },
+
     "exfiltration_url": {
         "pattern": r"https?://(?!internal\.)[^\s]+",
         "risk": "low",
@@ -80,19 +101,28 @@ class ContentInspector:
             for name, cfg in self.patterns.items()
         }
 
-    def inspect(self, request: dict) -> InspectionResult:
-        """Inspect a tool request payload."""
+    def inspect(self, request) -> InspectionResult:
+        """Inspect a tool request payload or legacy string message."""
         findings = []
         max_risk = "none"
 
-        # Extract all string values recursively
+        # Support both:
+        # - v0.2 core: nested dict/list payloads
+        # - legacy middleware: plain string message
         strings = self._extract_strings(request)
 
         for text in strings:
             for name, compiled in self._compiled.items():
                 if compiled.search(text):
                     cfg = self.patterns[name]
-                    findings.append(f"[{cfg['risk'].upper()}] {cfg['description']}: pattern={name}")
+                    findings.append(
+                        Finding(
+        rule_id=name,
+        rule_name=cfg["description"],
+        category=name.split("_")[0],
+        severity=cfg["risk"],
+        action="block" if RISK_LEVELS.index(cfg["risk"]) >= RISK_LEVELS.index(self.block_threshold) else "allow",
+    )                    )
                     if RISK_LEVELS.index(cfg["risk"]) > RISK_LEVELS.index(max_risk):
                         max_risk = cfg["risk"]
 
@@ -118,3 +148,4 @@ class ContentInspector:
             for item in obj:
                 strings.extend(self._extract_strings(item, depth + 1))
         return strings
+
