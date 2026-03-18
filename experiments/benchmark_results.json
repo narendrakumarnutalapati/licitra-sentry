@@ -2,15 +2,15 @@
   "metadata": {
     "python": "3.12.7 (tags/v3.12.7:0b05ead, Oct  1 2024, 03:06:41) [MSC v.1941 64 bit (AMD64)]",
     "platform": "win32",
-    "ts": "2026-03-10T10:12:01Z",
+    "ts": "2026-03-18T04:53:39Z",
     "benchmark_version": "v0.2"
   },
   "b1_sequential_full_pipeline": {
     "count": 1000,
-    "rps": 221,
-    "p50_ms": 4.352,
-    "p95_ms": 5.85,
-    "p99_ms": 7.45,
+    "rps": 188,
+    "p50_ms": 5.108,
+    "p95_ms": 6.575,
+    "p99_ms": 11.088,
     "decisions": {
       "APPROVED": 1000,
       "REJECTED": 0
@@ -20,10 +20,10 @@
   "b2_concurrent_full_pipeline": {
     "count": 1000,
     "threads": 20,
-    "rps": 329,
-    "p50_ms": 60.087,
-    "p95_ms": 66.833,
-    "p99_ms": 79.836,
+    "rps": 252,
+    "p50_ms": 78.395,
+    "p95_ms": 89.568,
+    "p99_ms": 104.217,
     "decisions": {
       "APPROVED": 1000,
       "REJECTED": 0
@@ -33,7 +33,7 @@
   "b3_security_failure_checks": {
     "replay_first_allowed": true,
     "replay_second_allowed": false,
-    "replay_second_error": "REPLAY_DETECTED: Ticket e18c5c80-7db2-4902-a513-36d8ee3e4e90 has already been used",
+    "replay_second_error": "REPLAY_DETECTED: Ticket 0ad1a7d4-2a59-4647-8ef8-9a89d2f49a6c has already been used",
     "tamper_allowed": false,
     "tamper_error": "TICKET_INVALID: Request hash mismatch: payload modified after authorization"
   }

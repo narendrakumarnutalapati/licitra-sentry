@@ -44,3 +44,6 @@ data/*.db
 # experiment runtime output
 experiments/evidence/*.json
 experiments/evidence/*.log
+
+# LICITRA pipeline artifacts (DO NOT COMMIT)
+artifacts/
