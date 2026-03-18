@@ -2,15 +2,26 @@
   "metadata": {
     "python": "3.12.7 (tags/v3.12.7:0b05ead, Oct  1 2024, 03:06:41) [MSC v.1941 64 bit (AMD64)]",
     "platform": "win32",
-    "ts": "2026-03-18T04:53:39Z",
-    "benchmark_version": "v0.2"
+    "ts": "2026-03-18T05:50:31Z",
+    "benchmark_version": "v0.2",
+    "mmr_context": {
+      "reachable": true,
+      "base_url": "http://localhost:8000",
+      "status": "ok",
+      "service": "licitra-mmr",
+      "ledger_version": "mmr-v0.1",
+      "block_size": 2,
+      "dev_mode": true,
+      "ledger_mode": "experiment",
+      "timestamp_utc": "2026-03-18T05:50:31.163603Z"
+    }
   },
   "b1_sequential_full_pipeline": {
     "count": 1000,
-    "rps": 188,
-    "p50_ms": 5.108,
-    "p95_ms": 6.575,
-    "p99_ms": 11.088,
+    "rps": 180,
+    "p50_ms": 5.079,
+    "p95_ms": 10.491,
+    "p99_ms": 12.575,
     "decisions": {
       "APPROVED": 1000,
       "REJECTED": 0
@@ -20,10 +31,10 @@
   "b2_concurrent_full_pipeline": {
     "count": 1000,
     "threads": 20,
-    "rps": 252,
-    "p50_ms": 78.395,
-    "p95_ms": 89.568,
-    "p99_ms": 104.217,
+    "rps": 232,
+    "p50_ms": 82.868,
+    "p95_ms": 122.751,
+    "p99_ms": 140.17,
     "decisions": {
       "APPROVED": 1000,
       "REJECTED": 0
@@ -33,7 +44,7 @@
   "b3_security_failure_checks": {
     "replay_first_allowed": true,
     "replay_second_allowed": false,
-    "replay_second_error": "REPLAY_DETECTED: Ticket 0ad1a7d4-2a59-4647-8ef8-9a89d2f49a6c has already been used",
+    "replay_second_error": "REPLAY_DETECTED: Ticket 0b9de4bf-90e3-4ca5-8b7a-8aa697268490 has already been used",
     "tamper_allowed": false,
     "tamper_error": "TICKET_INVALID: Request hash mismatch: payload modified after authorization"
   }

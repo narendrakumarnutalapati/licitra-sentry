@@ -18,9 +18,11 @@ import statistics
 import tempfile
 import shutil
 import hashlib
-import random
 import threading
 import concurrent.futures
+from typing import Any, Dict
+
+import requests
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -33,6 +35,46 @@ from app.authority import AuthorityEnforcer
 from app.audit_bridge import AuditBridge
 from app.orchestrator import SentryOrchestrator, AuthorizationRequest
 from app.tool_proxy import ToolProxy, ReplayStore
+
+
+MMR_BASE_URL = os.environ.get("LICITRA_MMR_BASE_URL", "http://localhost:8000")
+
+
+def get_mmr_context() -> Dict[str, Any]:
+    """
+    Best-effort fetch of LICITRA-MMR /health so benchmark output records
+    the ledger context under which measurements were taken.
+    """
+    url = f"{MMR_BASE_URL.rstrip('/')}/health"
+    try:
+        resp = requests.get(url, timeout=3)
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "reachable": True,
+            "base_url": MMR_BASE_URL,
+            "status": data.get("status"),
+            "service": data.get("service"),
+            "ledger_version": data.get("ledger_version"),
+            "block_size": data.get("block_size"),
+            "dev_mode": data.get("dev_mode"),
+            "ledger_mode": data.get("ledger_mode"),
+            "timestamp_utc": data.get("timestamp_utc"),
+        }
+    except Exception as exc:
+        return {
+            "reachable": False,
+            "base_url": MMR_BASE_URL,
+            "error": str(exc),
+        }
+
+
+def print_mmr_context() -> Dict[str, Any]:
+    context = get_mmr_context()
+    print("[MMR CONTEXT]")
+    print(json.dumps(context, indent=2))
+    print()
+    return context
 
 
 class BenchmarkContext:
@@ -299,6 +341,8 @@ def benchmark_security_failures(ctx: BenchmarkContext):
 
 if __name__ == "__main__":
     print(f"LICITRA-SENTRY Benchmark Suite v0.2\nPython {sys.version}\n")
+    mmr_context = print_mmr_context()
+
     ctx = BenchmarkContext()
     try:
         results = {
@@ -307,6 +351,7 @@ if __name__ == "__main__":
                 "platform": sys.platform,
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "benchmark_version": "v0.2",
+                "mmr_context": mmr_context,
             }
         }
         results["b1_sequential_full_pipeline"] = benchmark_sequential(ctx, count=1000)
